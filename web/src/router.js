@@ -7,7 +7,7 @@ const routes = {
   "/chat": createChatPage,
 };
 
-export function startRouter(root, { lightragAvailable = false, ragAvailable = false } = {}) {
+export function startRouter(root, { lightragAvailable = false, ragAvailable = false, ragStatus = {} } = {}) {
   let dispose = () => {};
 
   function render() {
@@ -15,8 +15,8 @@ export function startRouter(root, { lightragAvailable = false, ragAvailable = fa
     if (location.pathname === "/") history.replaceState({}, "", path);
     const createPage = routes[path] || routes["/documents"];
     dispose();
-    const page = createPage({ ragAvailable });
-    root.replaceChildren(createLayout(path in routes ? path : "/documents", page.element, lightragAvailable));
+    const page = createPage({ ragAvailable, ragStatus });
+    root.replaceChildren(createLayout(path in routes ? path : "/documents", page.element, lightragAvailable, ragStatus));
     dispose = page.dispose;
   }
 

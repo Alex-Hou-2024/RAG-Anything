@@ -60,3 +60,28 @@ def test_persistent_directory_must_not_be_a_file(
 
     with pytest.raises(ConfigurationError, match="RAG_OUTPUT_DIR directory"):
         Settings.from_environment()
+
+
+def test_partial_model_group_is_reported_at_startup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_required_environment(monkeypatch, tmp_path)
+    monkeypatch.setenv("LLM_MODEL", "custom-model")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+
+    assert "LLM 模型配置必须成套设置" in Settings.from_environment().model_configuration_error
+
+
+def test_known_embedding_dimension_mismatch_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_required_environment(monkeypatch, tmp_path)
+    monkeypatch.setenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://api.example.test/v1")
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "3072")
+
+    error = Settings.from_environment().model_configuration_error
+
+    assert error is not None
+    assert "EMBEDDING_DIMENSION=3072" in error
+    assert "需要 1536 维" in error

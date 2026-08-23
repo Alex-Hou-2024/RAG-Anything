@@ -3,7 +3,7 @@ const NAVIGATION = [
   ["/chat", "对话问答"],
 ];
 
-export function createLayout(activePath, content, lightragAvailable = false) {
+export function createLayout(activePath, content, lightragAvailable = false, ragStatus = {}) {
   const shell = document.createElement("div");
   shell.className = "app-shell";
 
@@ -31,6 +31,13 @@ export function createLayout(activePath, content, lightragAvailable = false) {
 
   const main = document.createElement("main");
   main.className = "page-content";
+  if (ragStatus.code === "missing_model_key") {
+    const banner = document.createElement("p");
+    banner.className = "model-key-banner";
+    banner.setAttribute("role", "alert");
+    banner.textContent = "未配置模型密钥，请在项目环境变量中设置 `OPENAI_API_KEY`";
+    main.append(banner);
+  }
   main.append(content);
   shell.append(header, main);
   return shell;

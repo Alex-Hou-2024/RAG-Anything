@@ -10,7 +10,7 @@ const MODES = [
   ["mix", "混合模式"],
 ];
 
-export function createChatPage({ ragAvailable = false } = {}) {
+export function createChatPage({ ragAvailable = false, ragStatus = {} } = {}) {
   const page = document.createElement("section");
   page.className = "page page--chat";
   page.innerHTML = `
@@ -43,7 +43,12 @@ export function createChatPage({ ragAvailable = false } = {}) {
     input.disabled = true;
     imageInput.disabled = true;
     submit.disabled = true;
-    errorBox.replaceChildren(createNotice("问答已暂停：管理员尚未配置 RAG 模型凭据。", "info"));
+    errorBox.replaceChildren(createNotice(
+      ragStatus.code === "missing_model_key"
+        ? "未配置模型密钥，请在项目环境变量中设置 `OPENAI_API_KEY`。"
+        : "问答已暂停：RAG 服务尚未就绪。",
+      "info",
+    ));
   }
 
   form.addEventListener("submit", async (event) => {

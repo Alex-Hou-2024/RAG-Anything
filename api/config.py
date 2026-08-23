@@ -24,6 +24,13 @@ _SECRET_PLACEHOLDERS: Final[frozenset[str]] = frozenset({
     "changeme",
     "your-openai-api-key",
 })
+_KNOWN_EMBEDDING_DIMENSIONS: Final[dict[str, int]] = {
+    # LightRAG's OpenAI embedding helper does not request reduced dimensions,
+    # so its configured vector-store dimension must equal the native response.
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+}
 
 
 def _get_env(name: str, default: str | None = None) -> str | None:
@@ -36,6 +43,9 @@ def _get_env(name: str, default: str | None = None) -> str | None:
 
 def _optional_secret(name: str) -> str | None:
     """Read a runtime secret, treating absent or example values as unavailable."""
+    raw_value = os.getenv(name)
+    if raw_value is not None and not raw_value.strip():
+        raise ConfigurationError(f"{name} must not use an empty placeholder value")
     value = _get_env(name)
     if value is None:
         return None
@@ -100,6 +110,16 @@ def _required_object_storage_fields(settings: "Settings") -> None:
         )
 
 
+def _is_explicitly_configured(name: str) -> bool:
+    """Return whether an environment value was supplied rather than defaulted."""
+    return _get_env(name) is not None
+
+
+def _valid_http_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """All service configuration read from environment variables.
@@ -140,6 +160,43 @@ class Settings:
     object_storage_access_key_id: str | None
     object_storage_secret_access_key: str | None
     object_storage_prefix: str
+
+    @property
+    def model_configuration_error(self) -> str | None:
+        """Return a safe startup diagnostic for incomplete model settings.
+
+        Defaults form complete OpenAI-compatible sets. When an operator
+        overrides any part of a set, require every peer explicitly so a model
+        cannot silently target the wrong provider endpoint.
+        """
+        groups = (
+            ("LLM", ("LLM_MODEL", "LLM_BASE_URL")),
+            ("VISION", ("VISION_MODEL", "VISION_BASE_URL")),
+            (
+                "EMBEDDING",
+                ("EMBEDDING_MODEL", "EMBEDDING_BASE_URL", "EMBEDDING_DIMENSION"),
+            ),
+        )
+        for label, names in groups:
+            supplied = [_is_explicitly_configured(name) for name in names]
+            if any(supplied) and not all(supplied):
+                return f"{label} 模型配置必须成套设置：{', '.join(names)}。"
+
+        for name, value in (
+            ("LLM_BASE_URL", self.llm_base_url),
+            ("VISION_BASE_URL", self.vision_base_url),
+            ("EMBEDDING_BASE_URL", self.embedding_base_url),
+        ):
+            if not _valid_http_url(value):
+                return f"{name} 必须是完整的 http(s) 地址。"
+
+        expected_dimension = _KNOWN_EMBEDDING_DIMENSIONS.get(self.embedding_model.casefold())
+        if expected_dimension is not None and self.embedding_dimension != expected_dimension:
+            return (
+                f"EMBEDDING_DIMENSION={self.embedding_dimension} 与 "
+                f"EMBEDDING_MODEL={self.embedding_model} 不匹配；该模型需要 {expected_dimension} 维。"
+            )
+        return None
 
     @classmethod
     def from_environment(cls) -> "Settings":

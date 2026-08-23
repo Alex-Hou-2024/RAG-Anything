@@ -2,12 +2,17 @@
 
 from types import SimpleNamespace
 
+from api.deps import MODEL_KEY_MISSING_ERROR
 from api.routers.health import build_health_payload
 from api.services.capabilities import Capabilities
 
 
 def test_health_payload_explains_degraded_runtime() -> None:
-    service = SimpleNamespace(is_ready=False, initialization_error="OPENAI_API_KEY is not configured")
+    service = SimpleNamespace(
+        is_ready=False,
+        initialization_error=MODEL_KEY_MISSING_ERROR,
+        initialization_code="missing_model_key",
+    )
     capabilities = Capabilities(
         mineru=False,
         libreoffice=False,
@@ -22,8 +27,9 @@ def test_health_payload_explains_degraded_runtime() -> None:
 
     assert payload["rag"] == {
         "initialized": False,
-        "error": "OPENAI_API_KEY is not configured",
-        "action": "RAG 服务未就绪；请检查模型密钥和模型配置后重启服务。",
+        "error": MODEL_KEY_MISSING_ERROR,
+        "code": "missing_model_key",
+        "action": "请在项目环境变量中设置 OPENAI_API_KEY 后重启服务。",
     }
     assert payload["capability_details"]["parser"]["effective"] == "python"
     assert "OCR" in payload["capability_details"]["parser"]["impact"]
@@ -31,7 +37,7 @@ def test_health_payload_explains_degraded_runtime() -> None:
 
 
 def test_health_payload_reports_ready_rag() -> None:
-    service = SimpleNamespace(is_ready=True, initialization_error=None)
+    service = SimpleNamespace(is_ready=True, initialization_error=None, initialization_code=None)
     capabilities = Capabilities(True, True, "mineru", False, ())
 
     payload = build_health_payload(
