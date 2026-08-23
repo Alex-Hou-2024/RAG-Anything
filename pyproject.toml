@@ -21,20 +21,28 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
+    # Core application and API runtime. Keep this set installable without
+    # model downloads, native office tools, or heavyweight document parsers.
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
     "python-multipart>=0.0.9,<1",
     "boto3>=1.35,<2",
     "SQLAlchemy>=2.0,<3",
     "psycopg[binary]>=3.2,<4",
+    "pydantic>=2,<3",
+    "Pillow>=10.0.0",
+    "python-dotenv>=1.0,<2",
     "huggingface_hub",
     "lightrag-hku<1.5",
-    "mineru[core]>=3.4.1",
     "tqdm",
 ]
 
 [project.optional-dependencies]
-image = ["Pillow>=10.0.0"]
+# Heavy parser stacks are opt-in so a default API deployment can start with
+# the basic runtime dependencies above.
+mineru = ["mineru[core]>=3.4.1"]
+docling = ["docling>=2.0.0"]
+image = []
 text = ["reportlab>=4.0.0"]
 office = []  # Requires LibreOffice (external program)
 paddleocr = [
@@ -47,7 +55,8 @@ markdown = [
     "pygments>=2.10.0",
 ]
 all = [
-    "Pillow>=10.0.0",
+    "mineru[core]>=3.4.1",
+    "docling>=2.0.0",
     "reportlab>=4.0.0",
     "paddleocr>=2.7.0",
     "pypdfium2>=4.25.0",
@@ -71,7 +80,6 @@ dev-dependencies = [
     "flake8",
     "mypy",
     "openai",
-    "python-dotenv",
 ]
 
 [tool.setuptools.packages.find]

@@ -60,7 +60,11 @@ requirements = read_requirements()
 
 # Define extras_require for optional features
 extras_require = {
-    "image": ["Pillow>=10.0.0"],  # For image format conversion (BMP, TIFF, GIF, WebP)
+    # Keep heavyweight parsers opt-in; requirements.txt contains only the
+    # base runtime required to launch the API and core RAG application.
+    "mineru": ["mineru[core]>=3.4.1"],
+    "docling": ["docling>=2.0.0"],
+    "image": [],  # Pillow is part of the base runtime.
     "text": ["reportlab>=4.0.0"],  # For text file to PDF conversion (TXT, MD)
     "office": [],  # Office document processing requires LibreOffice (external program)
     "paddleocr": [
@@ -68,7 +72,8 @@ extras_require = {
         "pypdfium2>=4.25.0",
     ],  # PaddleOCR parser for scanned PDFs
     "all": [
-        "Pillow>=10.0.0",
+        "mineru[core]>=3.4.1",
+        "docling>=2.0.0",
         "reportlab>=4.0.0",
         "paddleocr>=2.7.0",
         "pypdfium2>=4.25.0",
@@ -102,7 +107,7 @@ setuptools.setup(
         "Intended Audience :: Developers",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
-    python_requires=">=3.9",
+    python_requires=">=3.10",
     install_requires=requirements,
     extras_require=extras_require,
     include_package_data=True,  # Includes non-code files from MANIFEST.in

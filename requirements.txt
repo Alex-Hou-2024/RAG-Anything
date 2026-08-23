@@ -1,24 +1,20 @@
+# Base runtime dependencies. These are intentionally lightweight enough for
+# the API service to start without MinerU, Docling, or PaddleOCR.
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 python-multipart>=0.0.9,<1
 boto3>=1.35,<2
 SQLAlchemy>=2.0,<3
 psycopg[binary]>=3.2,<4
+pydantic>=2,<3
+Pillow>=10.0.0
+python-dotenv>=1.0,<2
 huggingface_hub
-# LightRAG packages
-lightrag-hku
-# MinerU 2.0 packages (replaces magic-pdf) - handles PDF parsing with multiple backends
-# >=3.4.1: earlier versions iterate pdftext's PageChars return value directly and
-# crash with "TypeError: 'PageChars' object is not iterable" against pdftext>=0.7
-mineru[core]>=3.4.1
-# Progress bars for batch processing
+lightrag-hku<1.5
 tqdm
-# Note: Optional dependencies are now defined in setup.py extras_require:
-# - [image]: Pillow>=10.0.0 (for BMP, TIFF, GIF, WebP format conversion)
-# - [text]: reportlab>=4.0.0 (for TXT, MD to PDF conversion)
-# - [paddleocr]: paddleocr + pypdfium2 (for parser='paddleocr' - better OCR for scanned PDFs)
-# - [office]: requires LibreOffice (external program, not Python package)
-# - [all]: includes all optional dependencies
-#
-# Install with: pip install raganything[image,text] or pip install raganything[all]
-# For best PDF handling: pip install raganything[paddleocr]
+
+# Optional heavyweight parsers are declared as package extras rather than
+# installed by default:
+#   pip install 'raganything[mineru]'
+#   pip install 'raganything[docling]'
+#   pip install 'raganything[paddleocr]'
