@@ -3,7 +3,8 @@
 Generic Document Parser Utility
 
 This module provides functionality for parsing documents using the built-in
-MinerU, Docling, and PaddleOCR parsers, and exposes a small registry for
+MinerU, a lightweight pure-Python fallback, Docling, and PaddleOCR parsers,
+and exposes a small registry for
 **in-process** custom parsers (see :func:`register_parser`).
 
 Important notes:
@@ -38,6 +39,7 @@ import time
 import urllib.parse
 import urllib.request
 import shutil
+from importlib.util import find_spec
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -805,6 +807,170 @@ class Parser:
         raise NotImplementedError(
             "check_installation must be implemented by subclasses"
         )
+
+
+def mineru_is_available() -> bool:
+    """Return whether this process can invoke MinerU without installing it.
+
+    MinerU is deliberately an optional dependency in server deployments.  A
+    module-only installation is supported by some versions, while others
+    expose the ``mineru`` executable, so probe both forms without importing
+    the heavyweight package or triggering model downloads.
+    """
+    return find_spec("mineru") is not None or shutil.which("mineru") is not None
+
+
+class PurePythonParser(Parser):
+    """Dependency-light parser used when the optional MinerU stack is absent.
+
+    This parser intentionally does not perform OCR, layout reconstruction, or
+    table recognition.  It extracts embedded PDF text and images with
+    :mod:`pypdf`; every extracted image is emitted as an ``img_path`` block so
+    the normal multimodal pipeline can obtain its visual description later.
+    """
+
+    __slots__ = ()
+    logger = logging.getLogger(__name__)
+    limitations = (
+        "当前使用基础解析：不含 OCR、版面还原或表格结构识别。",
+        "扫描版 PDF 只能提取其中嵌入的图片，文本识别需要安装 MinerU。",
+    )
+
+    @staticmethod
+    def _require_pypdf():
+        try:
+            from pypdf import PdfReader
+        except ImportError as error:
+            raise RuntimeError(
+                "基础 PDF 解析依赖 pypdf 未安装；请安装基础运行依赖后重试。"
+            ) from error
+        return PdfReader
+
+    @staticmethod
+    def _output_image_dir(
+        source_path: Path, output_dir: Optional[str]
+    ) -> Path:
+        if output_dir:
+            base_dir = Parser._unique_output_dir(output_dir, source_path)
+        else:
+            base_dir = source_path.parent / "python_parser_output"
+        image_dir = base_dir / "images"
+        image_dir.mkdir(parents=True, exist_ok=True)
+        return image_dir
+
+    def parse_pdf(
+        self,
+        pdf_path: Union[str, Path],
+        output_dir: Optional[str] = None,
+        method: str = "auto",
+        lang: Optional[str] = None,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """Extract PDF text and embedded images without external binaries."""
+        del method, lang, kwargs
+        source_path = Path(pdf_path)
+        if not source_path.is_file():
+            raise FileNotFoundError(f"PDF file does not exist: {source_path}")
+
+        reader = self._require_pypdf()(str(source_path))
+        image_dir = self._output_image_dir(source_path, output_dir)
+        content_list: List[Dict[str, Any]] = []
+        for page_idx, page in enumerate(reader.pages):
+            text = (page.extract_text() or "").strip()
+            if text:
+                content_list.append({"type": "text", "text": text, "page_idx": page_idx})
+
+            for image_idx, image in enumerate(page.images):
+                image_name = Path(getattr(image, "name", "embedded-image.png")).name
+                suffix = Path(image_name).suffix.lower()
+                if suffix not in self.IMAGE_FORMATS:
+                    suffix = ".png"
+                image_path = image_dir / f"page-{page_idx + 1}-image-{image_idx + 1}{suffix}"
+                image_path.write_bytes(image.data)
+                content_list.append(
+                    {
+                        "type": "image",
+                        "img_path": str(image_path.resolve()),
+                        "page_idx": page_idx,
+                    }
+                )
+
+        if not content_list:
+            raise RuntimeError(
+                "基础解析未能从此 PDF 提取文本或嵌入图片；扫描件请安装 MinerU 后重试。"
+            )
+        return content_list
+
+    def parse_image(
+        self,
+        image_path: Union[str, Path],
+        output_dir: Optional[str] = None,
+        lang: Optional[str] = None,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """Validate and retain an image for the existing visual-model flow."""
+        del output_dir, lang, kwargs
+        source_path = Path(image_path)
+        if not source_path.is_file():
+            raise FileNotFoundError(f"Image file does not exist: {source_path}")
+        if source_path.suffix.lower() not in self.IMAGE_FORMATS:
+            raise ValueError(f"Unsupported image format: {source_path.suffix}")
+        try:
+            from PIL import Image
+            with Image.open(source_path) as image:
+                image.verify()
+        except Exception as error:
+            raise RuntimeError(f"Unable to read image {source_path.name}: {error}") from error
+        return [{"type": "image", "img_path": str(source_path.resolve()), "page_idx": 0}]
+
+    def parse_office_doc(
+        self,
+        doc_path: Union[str, Path],
+        output_dir: Optional[str] = None,
+        lang: Optional[str] = None,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        del doc_path, output_dir, lang, kwargs
+        raise RuntimeError("当前环境不支持 Office 文件，请转为 PDF 后上传。")
+
+    def parse_text_file(
+        self,
+        text_path: Union[str, Path],
+        output_dir: Optional[str] = None,
+        lang: Optional[str] = None,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        del output_dir, lang, kwargs
+        source_path = Path(text_path)
+        if not source_path.is_file():
+            raise FileNotFoundError(f"Text file does not exist: {source_path}")
+        text = source_path.read_text(encoding="utf-8", errors="replace").strip()
+        if not text:
+            raise RuntimeError("文本文件为空，无法入库。")
+        return [{"type": "text", "text": text, "page_idx": 0}]
+
+    def parse_document(
+        self,
+        file_path: Union[str, Path],
+        method: str = "auto",
+        output_dir: Optional[str] = None,
+        lang: Optional[str] = None,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        source_path = Path(file_path)
+        suffix = source_path.suffix.lower()
+        if suffix == ".pdf":
+            return self.parse_pdf(source_path, output_dir, method, lang, **kwargs)
+        if suffix in self.IMAGE_FORMATS:
+            return self.parse_image(source_path, output_dir, lang, **kwargs)
+        if suffix in self.OFFICE_FORMATS:
+            return self.parse_office_doc(source_path, output_dir, lang, **kwargs)
+        if suffix in self.TEXT_FORMATS:
+            return self.parse_text_file(source_path, output_dir, lang, **kwargs)
+        raise ValueError(f"Unsupported file format for the base parser: {suffix}")
+
+    def check_installation(self) -> bool:
+        return find_spec("pypdf") is not None
 
 
 class MineruParser(Parser):
@@ -2645,7 +2811,7 @@ def register_parser(name: str, parser_class: type) -> None:
         raise TypeError(
             f"parser_class must be a subclass of Parser, got {parser_class!r}"
         )
-    _BUILTIN_NAMES = {"mineru", "docling", "paddleocr"}
+    _BUILTIN_NAMES = {"auto", "mineru", "python", "docling", "paddleocr"}
     if normalized_name in _BUILTIN_NAMES:
         raise ValueError(
             f"Cannot override built-in parser '{normalized_name}'. "
@@ -2683,7 +2849,9 @@ def list_parsers() -> Dict[str, str]:
         Includes both built-in and custom parsers.
     """
     result: Dict[str, str] = {
+        "auto": "MineruParser or PurePythonParser",
         "mineru": "MineruParser",
+        "python": "PurePythonParser",
         "docling": "DoclingParser",
         "paddleocr": "PaddleOCRParser",
     }
@@ -2692,7 +2860,7 @@ def list_parsers() -> Dict[str, str]:
     return result
 
 
-SUPPORTED_PARSERS = ("mineru", "docling", "paddleocr")
+SUPPORTED_PARSERS = ("auto", "mineru", "python", "docling", "paddleocr")
 
 
 def get_supported_parsers() -> tuple:
@@ -2716,9 +2884,17 @@ def get_parser(parser_type: str) -> Parser:
     Raises:
         ValueError: If the parser name is not recognized.
     """
-    parser_name = (parser_type or "mineru").strip().lower()
-    if parser_name == "mineru":
+    parser_name = (parser_type or "auto").strip().lower()
+    if parser_name in {"auto", "mineru"}:
+        if not mineru_is_available():
+            Parser.logger.warning(
+                "MinerU is unavailable; using the pure-Python parser. "
+                "OCR, layout restoration, and table recognition are disabled."
+            )
+            return PurePythonParser()
         return MineruParser()
+    if parser_name == "python":
+        return PurePythonParser()
     if parser_name == "docling":
         return DoclingParser()
     if parser_name == "paddleocr":

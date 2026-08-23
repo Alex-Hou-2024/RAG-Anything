@@ -15,6 +15,7 @@ from fastapi import UploadFile
 from api.config import Settings
 from api.deps import RAGService
 from api.models import DocumentRecord, DocumentRepository, DocumentStatus
+from api.services.capabilities import Capabilities, detect_capabilities
 
 logger = logging.getLogger(__name__)
 _ALLOWED_EXTENSIONS = frozenset({
@@ -23,6 +24,7 @@ _ALLOWED_EXTENSIONS = frozenset({
 })
 _MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+_OFFICE_EXTENSIONS = frozenset({".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"})
 
 
 class IngestError(ValueError):
@@ -117,6 +119,9 @@ class IngestService:
         self.settings = settings
         self.rag_service = rag_service
         self.documents = DocumentRepository()
+        # Capture the same runtime capability decision made during application
+        # startup. The content-list route remains independent of these tools.
+        self.capabilities: Capabilities = detect_capabilities()
         if settings.object_storage_endpoint:
             self.storage: ObjectStorage = S3ObjectStorage(settings)
         else:
@@ -152,6 +157,9 @@ class IngestService:
 
     async def accept_upload(self, upload: UploadFile) -> DocumentRecord:
         filename = self._filename(upload.filename)
+        if Path(filename).suffix.lower() in _OFFICE_EXTENSIONS and not self.capabilities.libreoffice:
+            await upload.close()
+            raise IngestError("当前环境不支持 Office 文件，请转为 PDF 后上传。")
         data = await self._read_upload(upload)
         # UUID is allocated first so the object and status record share a stable id.
         record = await self.documents.create(

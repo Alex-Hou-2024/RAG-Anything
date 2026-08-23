@@ -49,6 +49,7 @@ class TestRAGAnythingConfig:
         # Clear environment overrides to make defaults deterministic
         for key in [
             "PARSER",
+            "RAG_PARSER",
             "PARSE_METHOD",
             "ENABLE_IMAGE_PROCESSING",
             "ENABLE_TABLE_PROCESSING",
@@ -65,7 +66,7 @@ class TestRAGAnythingConfig:
 
         config = RAGAnythingConfig()
         assert config.parse_method == "auto"
-        assert config.parser == "mineru"
+        assert config.parser == "auto"
         assert config.enable_image_processing is True
         assert config.enable_table_processing is True
         assert config.enable_equation_processing is True
