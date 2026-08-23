@@ -1,140 +1,99 @@
-# RAG-Anything Web Service Architecture Plan
+# RAG-Anything unified web deployment plan (issues #19–#26)
 
-## Goal
-Add a deployable FastAPI API and a small web application around the existing
-`raganything` library. The service must retain document metadata, original and
-derived artifacts, and the RAG work directory across restarts while gracefully
-handling parser capabilities that may be unavailable in a self-hosted runtime.
+## Target architecture
 
-## Proposed module and file layout
+One FastAPI/uvicorn process owns the public application.  It serves the built
+single-page frontend, the existing RAG-Anything API, and (when available) the
+LightRAG WebUI.  There is no authentication, login route, session state, or
+separate Node runtime in production.
 
 ```
 api/
-  __init__.py
-  main.py                 # app factory, lifespan, CORS, router registration, errors
-  config.py               # typed environment settings and validation
-  deps.py                 # cached Settings, DB session, RAG service dependencies
-  schemas.py              # shared Pydantic request/response models and enums
-  db.py                   # SQLAlchemy engine/session lifecycle
-  models.py               # Document ORM model; Alembic metadata
+  main.py                 # app factory/lifespan; API routers; static SPA; /lightrag mount
+  config.py               # single environment-backed runtime configuration
+  deps.py                 # creates the one RAGAnything/LightRAG-backed service
   routers/
-    health.py             # GET /healthz
-    documents.py          # upload/content-list import, list/status/delete
-    query.py              # text and multimodal query, normal and SSE responses
+    documents.py          # upload, list, status and delete
+    query.py              # text and multimodal query contracts
   services/
-    capabilities.py       # MinerU/LibreOffice probes and supported-format policy
-    storage.py            # object-storage adapter for originals and derived artifacts
-    ingest.py             # durable state machine and background parse/index workflow
-    rag.py                # one lifespan-owned RAGAnything facade
-    query.py              # retrieval, citations, stream-to-SSE adaptation
-  errors.py               # domain errors -> stable API error payloads
-  logging.py              # structured logging setup
-migrations/               # Alembic configuration and document-table revisions
+    rag.py                # shared RAG facade and LightRAG-compatible configuration
+    query.py              # query validation/adaptation and answer/citation streaming
+  middleware/
+    lightrag_write_guard.py # blocks LightRAG text-only write endpoints
 web/
-  package.json
+  package.json, vite.config.*  # reproducible production build under web/dist
   src/
-    api-client/           # typed HTTP/SSE client and API DTO mapping
-    pages/documents/      # upload/drop zone, list, poll status, delete, capabilities
-    pages/chat/           # responsive chat, mode selector, image upload, streaming UI
-    components/Citations/ # expandable citation source renderers
-    shared/               # routing, layout, state and styles
-  tests/
-tests/
-  api/                    # API/service unit and integration tests
-  e2e/                    # self-hosted end-to-end flow
-.env.example              # only non-secret example values; tracked
+    main.* and router.*        # /documents and /chat routes; / redirects to /documents
+    api/                       # shared fetch, SSE and upload clients plus DTOs
+    pages/documents/           # ingest UI, polling, errors and capability indicators
+    pages/chat/                # modes, image upload, streaming answers and citations
+    components/                # navigation (including knowledge graph), shared UI/styles
+tests/api/                # request/schema/config and LightRAG-mount/guard tests
+tests/e2e/                # browser flow with a fixture multimodal PDF
 ```
 
-The existing `raganything/` package remains the multimodal processing and
-retrieval implementation; `api/services/rag.py` is its boundary so HTTP,
-persistence, and frontend code do not call it directly.
+The root static handler serves the SPA entry for client routes and sends `/` to
+the documents screen; it must not retain the current marketing HTML, auth
+redirect, or its static-hosting exception.  Assets are served without an
+Origin gate.  Proxy-aware public URLs/origin checks use `X-Forwarded-Host` and
+`X-Forwarded-Proto` (or `ALLOWED_CORS_ORIGIN`), never the rewritten `Host`.
 
-## Shared data contracts
+## Shared contracts and configuration
 
-- `DocumentStatus`: `pending`, `parsing`, `indexing`, `ready`, `failed`.
-- `Document`: UUID `id`, original filename, MIME/type, byte size, object key,
-  parsed-artifact prefix, status, human-readable `error_message`, timestamps,
-  and optional RAG/index identifier.
-- Upload returns `DocumentAccepted { document_id, status }`; status/list return
-  `DocumentSummary`; delete is idempotent where feasible.
-- `ContentListImportRequest` explicitly identifies pre-parsed content and uses
-  the same document lifecycle, preserving the capability-independent path.
-- `QueryRequest { query, mode, stream }` and `MultimodalQueryRequest` share
-  `QueryResponse { answer, citations }`; each citation identifies document,
-  content kind, stable fragment/artifact id, preview/locator, and optional
-  object-storage reference. Streaming emits typed SSE events (`delta`,
-  `citations`, `done`, `error`) that assemble to the same final shape.
-- All errors use a single JSON envelope with machine-readable `code`, message,
-  and optional details. Validation remains FastAPI/Pydantic-native but is
-  normalized by a global handler.
+- Keep document lifecycle endpoints as the source of truth: upload accepts a
+  file and returns its server-managed document/artifact path; `GET
+  /documents/{id}/status` provides state/error for polling.
+- Define multimodal content around `img_path`.  The chat client uploads its
+  image first, receives a server-accessible path, then posts it to `POST
+  /query/multimodal`.  The backend accepts legacy `image_data` only through an
+  explicit compatibility/validation branch and returns stable 4xx errors for
+  empty, missing, inaccessible, or malformed fields.
+- `Settings` is the one environment source.  Map its working directory,
+  parser/output settings, LLM, vision and embedding settings into
+  `RAGAnythingConfig` and the LightRAG WebUI/server creation so all use one
+  persistent LightRAG store, vectors and graph.  Retire or alias the duplicate
+  `WORKING_DIR`/`OUTPUT_DIR`/`PARSER` environment paths rather than letting
+  them drift from `RAG_*` settings.
+- Frontend API DTOs mirror the FastAPI payloads.  The shared client normalizes
+  API errors and parses typed SSE `delta`, `citations`, `done`, and `error`
+  events.  Citations retain source/document information for display.
+- The LightRAG integration is optional at runtime: probe package/static assets
+  during lifespan/startup.  If absent, do not render the knowledge-graph link
+  and report `lightrag_webui: false` in `/healthz`; do not expose a broken 404
+  route.  If present, mount under `/lightrag` with its static base/API prefix
+  rewritten for that subpath.
+- `/lightrag` is read-only in this deployment.  Hide its import controls where
+  supported; independently intercept its document insertion/upload/write
+  methods in middleware and return a clear response directing users to the
+  main documents screen.
 
-## Runtime and persistence decisions
+## Delivery order and issue dependencies
 
-1. Use FastAPI lifespan to create one settings object, DB engine, object storage
-   client, capability snapshot, and one `RAGAnything` facade per process; store
-   them on `app.state` and access them through dependency functions.
-2. Use Postgres via `DATABASE_URL` for metadata/status. Add Alembic migrations
-   rather than creating schema implicitly in request paths. Use a filesystem or
-   S3-compatible object-store abstraction configured with `OBJECT_STORAGE_*`;
-   production artifacts never live only in request temp directories.
-3. Configure the RAG/LightRAG working directory with a persistent
-   `RAG_WORKING_DIR`. It is initialized once and reused after restart; document
-   state is durable even if a worker fails mid-ingest.
-4. Start parsing with FastAPI `BackgroundTasks` (or an injected in-process task
-   runner) and make state transitions atomic and observable. Catch every task
-   exception, log it, and write `failed` plus a safe actionable error message;
-   request-serving remains alive.
-5. Capability probing happens at startup and is exposed in `/healthz`.
-   MinerU absence selects a PDF/image fallback; LibreOffice absence rejects
-   Office uploads early with an explicit `unsupported_format` error. Content
-   list import never depends on either tool.
-6. Query code translates RAGAnything outputs into stable citations. If the RAG
-   backend cannot stream, it returns one response/SSE completion rather than
-   failing. SSE uses standard `text/event-stream` and handles client
-   disconnects/cancellation.
-7. CORS is driven by `ALLOWED_CORS_ORIGIN` (plus development origins). Never
-   validate browser/static asset origins against the rewritten internal `Host`;
-   use `X-Forwarded-Host`/`X-Forwarded-Proto` for public-origin derivation when
-   needed.
-8. Keep API and web DTOs synchronized from the `api/schemas.py` contracts;
-   frontend types may be generated or maintained as a thin explicit mirror.
+1. **#19** Remove the landing page/auth redirect and make `/` enter document
+   management.  This clears the prerequisite for the SPA.
+2. **#20** Introduce the maintained `web/` project, shared client/routing,
+   Chinese responsive Documents and Chat UI, then build it into FastAPI static
+   assets.  It depends on #19.
+3. **#21** Replace browser base64 `image_data` posting with upload-plus-
+   `img_path`; add backend compatibility validation and API tests.  It depends
+   on #20.
+4. **#22** Consolidate API/library/LightRAG storage and model configuration,
+   document all variables in `.env.example`.  This is required before sharing
+   the graph UI.
+5. **#23** Mount the verified optional LightRAG WebUI at `/lightrag`, including
+   a capability-aware frontend navigation entry.  It depends on #22.
+6. **#24** Apply the UI suppression and server-side write guard to that mount.
+   It depends on #23.
+7. **#25** Document/build the single-uvicorn deployment, Python 3.10+ and
+   optional MinerU/LibreOffice requirements.  It depends on #20 and #23.
+8. **#26** Run browser/API E2E coverage for no-auth root access, multimodal PDF
+   upload to `ready`, cited chat answer, graph visibility, and absence of the
+   former `invalid_request` auth behavior.  It depends on #21, #24 and #25.
 
-## Configuration and dependencies
+## Key checks
 
-Issue #1 will add a tracked `.env.example` documenting `OPENAI_API_KEY`, LLM,
-vision, and embedding model/base URL settings; `RAG_WORKING_DIR`; `DATABASE_URL`;
-`OBJECT_STORAGE_*`; `ALLOWED_CORS_ORIGIN`; and server/logging configuration.
-Secrets are environment-only. Add the minimal runtime dependencies in the
-Python project: FastAPI/ASGI server, Pydantic settings, SQLAlchemy + Postgres
-driver, Alembic, multipart support, and an S3-compatible client as selected by
-the storage adapter. Frontend tooling is isolated under `web/`.
-
-## Issue order and dependencies
-
-1. **#1 FastAPI skeleton/config** — foundational app factory, lifespan, config,
-   health endpoint, shared errors/logging, singleton RAG facade.
-2. **#4 durable document metadata/state** — depends on #1; database model,
-   migration, storage adapter and persistent work-dir wiring. Implement before
-   ingestion despite its issue number because #2 needs durable records.
-3. **#2 document upload/asynchronous parsing** — depends on #1 and consumes #4;
-   endpoints and guarded ingestion lifecycle, including content-list import.
-4. **#5 capability probe/fallback** — depends on #2; plugs into file admission
-   and parse selection, and extends health output.
-5. **#3 query API** — depends on #2; citations and SSE built on indexed docs.
-6. **#6 document management page** — depends on #2 and #5; uses documents and
-   health capability APIs with polling.
-7. **#7 chat page** — depends on #3; streams answers and renders citations.
-8. **#8 key-path tests** — depends on #3 and #5; exercise contracts, state
-   transitions, direct import, citations and degraded paths with fakes.
-9. **#9 end-to-end verification** — depends on #6–#8; validates a self-hosted
-   persistent upload → ready → cited query → restart workflow and deployment
-   documentation.
-
-## Testing strategy
-
-Use dependency overrides/fakes for RAG, object storage, capabilities, and
-background runner so tests are deterministic. API tests cover validation,
-status transitions, durable error recording, direct import, query citation
-mapping/SSE, and all fallbacks. E2E uses a real Postgres/object-store-compatible
-self-hosted profile plus a fixture PDF containing text, an image, and a table;
-it verifies persistence after process restart.
+Build the frontend before deployment (no development server); start only
+`uvicorn api.main:app`.  API tests mock RAG/LightRAG availability, file paths,
+and streaming.  E2E uses a fixture PDF with both image and table and skips or
+marks the graph assertion only when `/healthz` explicitly declares the optional
+WebUI unavailable.
