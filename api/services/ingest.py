@@ -248,7 +248,11 @@ class IngestService:
                 method = getattr(rag, "process_document_complete", None)
                 if method is None:
                     raise RuntimeError("RAG backend does not support document processing")
-                result = method(str(source_path), output_dir=str(self.settings.rag_output_dir / str(document_id)))
+                result = method(
+                    str(source_path),
+                    output_dir=str(self.settings.rag_output_dir / str(document_id)),
+                    doc_id=str(document_id),
+                )
                 await self.documents.update_status(document_id, DocumentStatus.INDEXING)
             if inspect.isawaitable(result):
                 await result
@@ -259,12 +263,43 @@ class IngestService:
             await self.documents.update_status(document_id, DocumentStatus.FAILED, safe_message[:500])
 
     async def delete_document(self, document_id: UUID) -> bool:
-        record = await self.documents.delete(document_id)
+        record = await self.documents.get(document_id)
         if record is None:
             return False
+        rag = self.rag_service.instance
+        cleanup_method = getattr(rag, "delete_document_index", None) if rag is not None else None
+        if not callable(cleanup_method):
+            message = "无法删除文档：LightRAG 索引清理不可用，文档记录已保留。"
+            await self._record_deletion_error(document_id, message)
+            raise IngestError(message)
+        try:
+            result = cleanup_method(str(document_id))
+            if inspect.isawaitable(result):
+                await result
+        except Exception as error:
+            logger.exception("LightRAG index cleanup failed document_id=%s", document_id)
+            detail = str(error).strip() or "未知错误"
+            message = f"无法删除文档：LightRAG 索引清理失败（{detail[:400]}）。文档记录已保留。"
+            await self._record_deletion_error(document_id, message)
+            raise IngestError(message) from error
+
+        deleted = await self.documents.delete(document_id)
+        if deleted is None:
+            # A concurrent delete has already removed the metadata after a
+            # confirmed index cleanup, which is the desired final state.
+            return True
         if record.object_key:
             try:
                 await self.storage.delete(record.object_key)
             except Exception:
                 logger.exception("Object cleanup failed document_id=%s", document_id)
         return True
+
+    async def _record_deletion_error(self, document_id: UUID, message: str) -> None:
+        """Keep the client-visible cleanup error when metadata storage is healthy."""
+        try:
+            await self.documents.set_error(document_id, message)
+        except Exception:
+            # Do not replace the actionable LightRAG deletion error with an
+            # unrelated metadata-write failure in the HTTP response.
+            logger.exception("Failed to persist index cleanup error document_id=%s", document_id)

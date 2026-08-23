@@ -25,16 +25,22 @@ _PNG = b"\x89PNG\r\n\x1a\n" + b"self-hosted-e2e"
 class FakeRAG:
     def __init__(self) -> None:
         self.parse_attempts = 0
+        self.deleted_document_ids: list[str] = []
 
     async def _ensure_lightrag_initialized(self) -> dict[str, bool]:
         return {"success": True}
 
-    async def process_document_complete(self, file_path: str, *, output_dir: str) -> None:
+    async def process_document_complete(
+        self, file_path: str, *, output_dir: str, doc_id: str
+    ) -> None:
         assert Path(file_path).is_file()
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self.parse_attempts += 1
         if self.parse_attempts == 1:
             raise RuntimeError("temporary parser failure")
+
+    async def delete_document_index(self, doc_id: str) -> None:
+        self.deleted_document_ids.append(doc_id)
 
     async def aquery(self, query: str, *, mode: str) -> dict[str, Any]:
         return {
@@ -82,6 +88,11 @@ def test_self_hosted_upload_parse_and_retrieval_flow(tmp_path: Path) -> None:
         retried_status = client.get(f"/api/documents/{document_id}/status")
         assert retried_status.status_code == 200
         assert retried_status.json()["status"] == "ready"
+
+        deleted = client.delete(f"/api/documents/{document_id}")
+        assert deleted.status_code == 204
+        assert rag.deleted_document_ids == [document_id]
+        assert client.get(f"/api/documents/{document_id}/status").status_code == 404
 
         answer = client.post(
             "/api/query",

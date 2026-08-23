@@ -10,6 +10,7 @@ import os
 import time
 import hashlib
 import json
+import inspect
 from typing import Dict, List, Any, Tuple, Optional
 from pathlib import Path
 
@@ -46,6 +47,40 @@ class ProcessorMixin:
             return str(file_path)
         else:
             return os.path.basename(file_path)
+
+    async def delete_document_index(self, doc_id: str) -> None:
+        """Remove all LightRAG chunks, graph records, and vectors for one document.
+
+        The application-owned UUID is passed into both document ingestion paths,
+        so it is also the sole identifier used for a complete deletion.  A
+        missing LightRAG record is safe: there is no index left to remove.
+        """
+        init_result = await self._ensure_lightrag_initialized()
+        if not init_result or not init_result.get("success"):
+            detail = (init_result or {}).get("error", "unknown error")
+            raise RuntimeError(f"LightRAG initialization failed before deletion: {detail}")
+
+        delete_method = getattr(self.lightrag, "adelete_by_doc_id", None)
+        if not callable(delete_method):
+            raise RuntimeError("Installed LightRAG does not support document index deletion")
+
+        result = delete_method(doc_id)
+        if inspect.isawaitable(result):
+            result = await result
+        result_status = getattr(result, "status", None)
+        if result_status is None and isinstance(result, dict):
+            result_status = result.get("status")
+        if result_status in {"success", "not_found"}:
+            self.logger.info("LightRAG index cleanup completed for document %s", doc_id)
+            return
+
+        result_message = getattr(result, "message", None)
+        if result_message is None and isinstance(result, dict):
+            result_message = result.get("message")
+        raise RuntimeError(
+            "LightRAG index deletion did not complete"
+            f" (status={result_status or 'unknown'}): {result_message or 'no details'}"
+        )
 
     def _generate_cache_key(
         self, file_path: Path, parse_method: str = None, **kwargs

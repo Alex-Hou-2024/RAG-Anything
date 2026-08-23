@@ -186,6 +186,22 @@ class DocumentRepository:
             session.flush()
             return _record(row)
 
+    async def set_error(self, document_id: UUID, error_message: str | None) -> DocumentRecord | None:
+        """Persist an operational error without changing the document's index state."""
+        return await asyncio.to_thread(self._set_error, document_id, error_message)
+
+    def _set_error(
+        self, document_id: UUID, error_message: str | None
+    ) -> DocumentRecord | None:
+        with self._session_factory.begin() as session:
+            row = session.get(DocumentRow, document_id)
+            if row is None:
+                return None
+            row.error_message = error_message
+            row.updated_at = datetime.now(timezone.utc)
+            session.flush()
+            return _record(row)
+
     async def mark_interrupted_as_failed(self, reason: str) -> int:
         """Make work abandoned by a process restart visible and retryable."""
         return await asyncio.to_thread(self._mark_interrupted_as_failed, reason)
