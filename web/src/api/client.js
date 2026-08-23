@@ -1,3 +1,5 @@
+import { apiUrl } from "./base-url.js";
+
 /** Same-origin API utilities shared by each application page. */
 export class ApiError extends Error {
   constructor(message, status, details = undefined) {
@@ -22,13 +24,13 @@ async function errorFrom(response) {
 export async function api(path, options = {}) {
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(apiUrl(path), { ...options, headers });
   if (!response.ok) throw await errorFrom(response);
   return response.status === 204 ? null : response.json();
 }
 
 export async function streamQuery(payload, handlers) {
-  const response = await fetch("/query", {
+  const response = await fetch(apiUrl("query"), {
     method: "POST",
     headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, stream: true }),
