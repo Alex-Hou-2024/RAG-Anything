@@ -1,0 +1,1 @@
+export function citations(items=[]){const box=document.createElement('details');box.innerHTML='<summary>引用来源</summary>';items.forEach(x=>{const p=document.createElement('p');p.textContent=`${x.kind||'片段'}: ${x.preview||x.id||''}`;box.append(p)});return box}
