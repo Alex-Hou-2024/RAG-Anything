@@ -6,6 +6,7 @@ import asyncio
 from types import SimpleNamespace
 
 from api.deps import MODEL_KEY_MISSING_ERROR, RAGService
+from api.services.rag import ModelProbeCache
 
 
 def test_missing_openai_key_disables_rag_without_calling_factory() -> None:
@@ -61,3 +62,31 @@ def test_invalid_storage_configuration_disables_rag_without_calling_factory() ->
     assert not factory_called
     assert service.initialization_code == "invalid_storage_configuration"
     assert "RAG_OUTPUT_DIR" in service.initialization_error
+
+
+def test_model_probes_are_cached_and_do_not_change_rag_readiness() -> None:
+    calls = {"chat": 0, "vision": 0, "embedding": 0}
+
+    class FakeRAG:
+        async def llm_model_func(self, *_args, **_kwargs) -> str:
+            calls["chat"] += 1
+            return "OK"
+
+        async def vision_model_func(self, *_args, **_kwargs) -> str:
+            calls["vision"] += 1
+            raise TimeoutError("simulated timeout")
+
+        async def embedding_func(self, _texts) -> list[list[float]]:
+            calls["embedding"] += 1
+            return [[0.0]]
+
+    cache = ModelProbeCache(ttl_seconds=60)
+    first = asyncio.run(cache.probe(FakeRAG()))
+    second = asyncio.run(cache.probe(FakeRAG()))
+
+    assert calls == {"chat": 1, "vision": 1, "embedding": 1}
+    assert first is second
+    assert first["chat"].available is True
+    assert first["vision"].available is False
+    assert "超时" in first["vision"].reason
+    assert first["embedding"].available is True

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import inspect
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from fastapi import Request
 
 from .config import Settings, get_settings
-from .services.rag import create_rag_anything
+from .services.rag import ModelProbeCache, create_rag_anything
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +32,16 @@ class RAGService:
     instance: Any | None = None
     initialization_error: str | None = None
     initialization_code: str | None = None
+    model_probe_cache: ModelProbeCache = field(default_factory=ModelProbeCache)
 
     @property
     def is_ready(self) -> bool:
         return self.instance is not None and self.initialization_error is None
+
+    @property
+    def model_probes(self) -> dict[str, dict[str, str | bool]]:
+        """Return cached, non-secret model diagnostics without making requests."""
+        return self.model_probe_cache.public()
 
     async def initialize(self) -> None:
         """Construct the singleton while preserving health diagnostics on failure."""
@@ -66,6 +72,10 @@ class RAGService:
                 if isinstance(result, dict) and not result.get("success", True):
                     self.initialization_error = str(result.get("error", "RAG initialization failed"))
                     self.initialization_code = "rag_initialization_failed"
+            if self.initialization_error is None:
+                # These calls deliberately do not affect `is_ready`: documents
+                # remain available even if a provider is temporarily down.
+                await self.model_probe_cache.probe(self.instance)
             logger.info("RAGAnything singleton initialization attempted")
         except Exception as error:
             self.initialization_code = "rag_initialization_failed"
