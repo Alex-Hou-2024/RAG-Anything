@@ -115,10 +115,15 @@ class S3ObjectStorage:
 
 
 class IngestService:
-    def __init__(self, settings: Settings, rag_service: RAGService) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        rag_service: RAGService,
+        documents: DocumentRepository,
+    ) -> None:
         self.settings = settings
         self.rag_service = rag_service
-        self.documents = DocumentRepository()
+        self.documents = documents
         # Capture the same runtime capability decision made during application
         # startup. The content-list route remains independent of these tools.
         self.capabilities: Capabilities = detect_capabilities()
@@ -172,8 +177,24 @@ class IngestService:
             logger.exception("Object storage write failed document_id=%s", record.id)
             await self.documents.update_status(record.id, DocumentStatus.FAILED, "Could not store uploaded file")
             raise IngestError("Could not store uploaded file") from error
-        record.object_key = key
-        return record
+        try:
+            stored_record = await self.documents.update_object_key(record.id, key)
+        except Exception as error:
+            logger.exception("Document metadata update failed document_id=%s", record.id)
+            try:
+                await self.storage.delete(key)
+            except Exception:
+                logger.exception("Object cleanup failed document_id=%s", record.id)
+            raise IngestError("Could not persist uploaded document metadata") from error
+        if stored_record is None:
+            # A concurrent delete is unlikely during upload, but never return a
+            # record that cannot later be recovered by the ingestion worker.
+            try:
+                await self.storage.delete(key)
+            except Exception:
+                logger.exception("Object cleanup failed document_id=%s", record.id)
+            raise IngestError("Document metadata disappeared during upload")
+        return stored_record
 
     async def accept_content_list(self, filename: str, content_list: Any) -> DocumentRecord:
         if not isinstance(content_list, list) or not content_list:

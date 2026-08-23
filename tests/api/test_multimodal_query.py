@@ -28,7 +28,13 @@ class FakeRAG:
 
 def make_client(tmp_path: Path) -> tuple[TestClient, FakeRAG]:
     rag = FakeRAG()
-    settings = replace(Settings.from_environment(), rag_working_dir=tmp_path)
+    settings = replace(
+        Settings.from_environment(),
+        rag_working_dir=tmp_path,
+        rag_output_dir=tmp_path / "output",
+        rag_parser_cache_dir=tmp_path / "cache",
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'documents.sqlite3'}",
+    )
     app = create_app(settings=settings, rag_factory=lambda _: rag)
     return TestClient(app), rag
 
@@ -37,7 +43,7 @@ def test_uploaded_image_path_is_used_for_multimodal_query(tmp_path: Path) -> Non
     client, rag = make_client(tmp_path)
     with client:
         upload = client.post(
-            "/query/multimodal/images",
+            "/api/query/multimodal/images",
             files={"image": ("question.png", _PNG, "image/png")},
         )
         assert upload.status_code == 201
@@ -46,7 +52,7 @@ def test_uploaded_image_path_is_used_for_multimodal_query(tmp_path: Path) -> Non
         assert Path(img_path).is_relative_to(tmp_path / "query_uploads")
 
         response = client.post(
-            "/query/multimodal",
+            "/api/query/multimodal",
             json={
                 "query": "图片里有什么？",
                 "mode": "hybrid",
@@ -63,7 +69,7 @@ def test_legacy_image_data_is_converted_to_server_path(tmp_path: Path) -> None:
     client, rag = make_client(tmp_path)
     with client:
         response = client.post(
-            "/query/multimodal",
+            "/api/query/multimodal",
             json={
                 "query": "识别图片",
                 "multimodal_content": [
@@ -93,7 +99,7 @@ def test_invalid_multimodal_image_fields_return_clear_422(
     client, _ = make_client(tmp_path)
     with client:
         response = client.post(
-            "/query/multimodal",
+            "/api/query/multimodal",
             json={"query": "测试", "multimodal_content": content},
         )
 

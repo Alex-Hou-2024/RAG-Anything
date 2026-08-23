@@ -17,7 +17,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import Settings, get_settings
+from .db import Database
 from .deps import RAGFactory, RAGService, create_rag_anything
+from .models import DocumentRepository
 from .routers.documents import router as documents_router
 from .routers.health import router as health_router
 from .routers.query import router as query_router
@@ -100,15 +102,25 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         service = RAGService(settings=app_settings, factory=factory)
+        database = Database.from_settings(app_settings)
+        await database.run_migrations()
         app.state.settings = app_settings
+        app.state.database = database
         app.state.rag_service = service
-        app.state.ingest_service = IngestService(app_settings, service)
+        app.state.ingest_service = IngestService(
+            app_settings,
+            service,
+            DocumentRepository(database.session_factory),
+        )
         app.state.query_service = QueryService(service)
         app.state.capabilities = detect_capabilities()
         app.state.lightrag_webui_available = lightrag_webui_root is not None
-        await service.initialize()
-        yield
-        await service.shutdown()
+        try:
+            await service.initialize()
+            yield
+        finally:
+            await service.shutdown()
+            await database.dispose()
 
     app = FastAPI(
         title="RAG-Anything API",

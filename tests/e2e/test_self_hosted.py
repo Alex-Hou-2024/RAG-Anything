@@ -39,6 +39,8 @@ def test_self_hosted_upload_parse_and_retrieval_flow(tmp_path: Path) -> None:
         Settings.from_environment(),
         rag_working_dir=tmp_path / "working",
         rag_output_dir=tmp_path / "output",
+        rag_parser_cache_dir=tmp_path / "cache",
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'documents.sqlite3'}",
     )
     app = create_app(settings=settings, rag_factory=lambda _: FakeRAG())
 
