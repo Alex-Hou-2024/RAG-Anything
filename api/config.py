@@ -96,9 +96,12 @@ class Settings:
     embedding_base_url: str
     embedding_dimension: int
 
+    # Canonical RAG/LightRAG runtime settings. These are the only storage,
+    # parser, and model values used to construct both services.
     rag_working_dir: Path
     rag_output_dir: Path
     rag_parser: str
+    rag_parse_method: str
     database_url: str | None
 
     object_storage_endpoint: str | None
@@ -136,6 +139,7 @@ class Settings:
                 _get_env("RAG_OUTPUT_DIR", "./output") or "./output"
             ).expanduser(),
             rag_parser=_get_env("RAG_PARSER", "mineru") or "mineru",
+            rag_parse_method=_get_env("RAG_PARSE_METHOD", "auto") or "auto",
             database_url=_get_env("DATABASE_URL"),
             object_storage_endpoint=_get_env("OBJECT_STORAGE_ENDPOINT"),
             object_storage_bucket=_get_env("OBJECT_STORAGE_BUCKET"),
@@ -151,6 +155,10 @@ class Settings:
             raise ConfigurationError("APP_PORT must be between 1 and 65535")
         if settings.embedding_dimension <= 0:
             raise ConfigurationError("EMBEDDING_DIMENSION must be positive")
+        if not settings.rag_parser:
+            raise ConfigurationError("RAG_PARSER must not be empty")
+        if not settings.rag_parse_method:
+            raise ConfigurationError("RAG_PARSE_METHOD must not be empty")
         _required_object_storage_fields(settings)
         return settings
 

@@ -15,18 +15,18 @@ class RAGAnythingConfig:
 
     # Directory Configuration
     # ---
-    working_dir: str = field(default=get_env_value("WORKING_DIR", "./rag_storage", str))
+    working_dir: str = field(default=get_env_value("RAG_WORKING_DIR", "./rag_storage", str))
     """Directory where RAG storage and cache files are stored."""
 
     # Parser Configuration
     # ---
-    parse_method: str = field(default=get_env_value("PARSE_METHOD", "auto", str))
+    parse_method: str = field(default=get_env_value("RAG_PARSE_METHOD", "auto", str))
     """Default parsing method for document parsing: 'auto', 'ocr', or 'txt'."""
 
-    parser_output_dir: str = field(default=get_env_value("OUTPUT_DIR", "./output", str))
+    parser_output_dir: str = field(default=get_env_value("RAG_OUTPUT_DIR", "./output", str))
     """Default output directory for parsed content."""
 
-    parser: str = field(default=get_env_value("PARSER", "mineru", str))
+    parser: str = field(default=get_env_value("RAG_PARSER", "mineru", str))
     """Parser selection: 'mineru', 'docling', or 'paddleocr'."""
 
     display_content_stats: bool = field(
@@ -118,12 +118,12 @@ class RAGAnythingConfig:
         """Post-initialization setup for backward compatibility"""
         # Support legacy environment variable names for backward compatibility
         legacy_parse_method = get_env_value("MINERU_PARSE_METHOD", None, str)
-        if legacy_parse_method and not get_env_value("PARSE_METHOD", None, str):
+        if legacy_parse_method and not get_env_value("RAG_PARSE_METHOD", None, str):
             self.parse_method = legacy_parse_method
             import warnings
 
             warnings.warn(
-                "MINERU_PARSE_METHOD is deprecated. Use PARSE_METHOD instead.",
+                "MINERU_PARSE_METHOD is deprecated. Use RAG_PARSE_METHOD instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
