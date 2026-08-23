@@ -108,6 +108,10 @@ async def document_status(document_id: UUID, request: Request) -> dict[str, Any]
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(document_id: UUID, request: Request) -> Response:
-    if not await _service(request).delete_document(document_id):
+    try:
+        deleted = await _service(request).delete_document(document_id)
+    except IngestError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    if not deleted:
         raise _not_found()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
