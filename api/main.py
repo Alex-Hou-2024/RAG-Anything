@@ -7,12 +7,14 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, get_settings
 from .deps import RAGFactory, RAGService, create_rag_anything
@@ -154,6 +156,12 @@ def create_app(
                 "error": service.initialization_error,
             },
         }
+
+    # The root is the document-management entry point.  Mounting this last
+    # leaves all explicit API routes above in control and deliberately provides
+    # no authentication, session, or marketing-page routes.
+    web_root = Path(__file__).resolve().parent.parent / "web"
+    app.mount("/", StaticFiles(directory=web_root, html=True), name="web")
 
     return app
 
