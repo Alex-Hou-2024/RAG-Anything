@@ -12,7 +12,6 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -25,7 +24,7 @@ from .routers.lightrag import discover_webui_directory, router as lightrag_route
 from .services.ingest import IngestService
 from .services.query import QueryService
 from .services.capabilities import detect_capabilities
-from .middleware import LightRAGReadOnlyMiddleware
+from .middleware import LightRAGReadOnlyMiddleware, ProxyAwareCORSMiddleware
 
 logger = logging.getLogger("api")
 
@@ -125,12 +124,8 @@ def create_app(
     # future WebUI API paths that its static bundle may issue.
     app.add_middleware(LightRAGReadOnlyMiddleware)
     app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(app_settings.allowed_cors_origins),
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
-        expose_headers=["X-Request-ID"],
+        ProxyAwareCORSMiddleware,
+        allowed_origins=app_settings.allowed_cors_origins,
     )
 
     @app.middleware("http")

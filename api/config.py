@@ -34,13 +34,13 @@ def _get_env(name: str, default: str | None = None) -> str | None:
     return value if value else default
 
 
-def _required_secret(name: str) -> str:
-    """Read a required secret and reject the documented placeholder values."""
+def _optional_secret(name: str) -> str | None:
+    """Read a runtime secret, treating absent or example values as unavailable."""
     value = _get_env(name)
-    if value is None or value.casefold() in _SECRET_PLACEHOLDERS:
-        raise ConfigurationError(
-            f"{name} is required; set it to a runtime secret before starting the service"
-        )
+    if value is None:
+        return None
+    if value.casefold() in _SECRET_PLACEHOLDERS:
+        raise ConfigurationError(f"{name} must not use a documented placeholder value")
     return value
 
 
@@ -104,10 +104,11 @@ def _required_object_storage_fields(settings: "Settings") -> None:
 class Settings:
     """All service configuration read from environment variables.
 
-    OPENAI_API_KEY is required because the RAG backend cannot serve ingestion
-    or retrieval without it. Persistent working and parser-output directories
-    are created while reading settings so startup fails with a direct
-    configuration error instead of a later storage failure.
+    When OPENAI_API_KEY is absent, the HTTP application remains available in a
+    degraded state and health reports that RAG ingestion/query is unavailable.
+    Persistent working and parser-output directories are created while reading
+    settings so startup fails with a direct configuration error instead of a
+    later storage failure.
     """
 
     app_host: str
@@ -116,7 +117,7 @@ class Settings:
     app_environment: str
     allowed_cors_origins: tuple[str, ...]
 
-    openai_api_key: str
+    openai_api_key: str | None
     llm_model: str
     llm_base_url: str
     vision_model: str
@@ -149,7 +150,7 @@ class Settings:
             app_log_level=(_get_env("APP_LOG_LEVEL", "INFO") or "INFO").upper(),
             app_environment=_get_env("APP_ENVIRONMENT", "production") or "production",
             allowed_cors_origins=_get_origins(_get_env("ALLOWED_CORS_ORIGIN")),
-            openai_api_key=_required_secret("OPENAI_API_KEY"),
+            openai_api_key=_optional_secret("OPENAI_API_KEY"),
             llm_model=_get_env("LLM_MODEL", "gpt-4o-mini") or "gpt-4o-mini",
             llm_base_url=_get_env("LLM_BASE_URL", "https://api.openai.com/v1")
             or "https://api.openai.com/v1",

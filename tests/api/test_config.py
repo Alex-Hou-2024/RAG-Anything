@@ -17,12 +17,13 @@ def _set_required_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     monkeypatch.setenv("RAG_OUTPUT_DIR", str(tmp_path / "output"))
 
 
-def test_openai_key_is_required(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_missing_openai_key_leaves_rag_in_degraded_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _set_required_environment(monkeypatch, tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY")
 
-    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY is required"):
-        Settings.from_environment()
+    assert Settings.from_environment().openai_api_key is None
 
 
 @pytest.mark.parametrize("value", ["", "replace-with-runtime-secret", "YOUR-OPENAI-API-KEY"])
@@ -32,7 +33,7 @@ def test_openai_key_placeholder_is_rejected(
     _set_required_environment(monkeypatch, tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", value)
 
-    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY is required"):
+    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY must not use"):
         Settings.from_environment()
 
 

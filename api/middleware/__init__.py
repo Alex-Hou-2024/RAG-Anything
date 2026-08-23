@@ -1,3 +1,5 @@
 """Application middleware."""
 from .lightrag_readonly import LightRAGReadOnlyMiddleware
-__all__ = ["LightRAGReadOnlyMiddleware"]
+from .proxy_cors import ProxyAwareCORSMiddleware
+
+__all__ = ["LightRAGReadOnlyMiddleware", "ProxyAwareCORSMiddleware"]
