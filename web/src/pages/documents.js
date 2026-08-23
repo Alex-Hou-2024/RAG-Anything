@@ -47,14 +47,18 @@ export function createDocumentsPage() {
   const documentList = page.querySelector(".document-list");
   let timerId = null;
   let isRefreshing = false;
+  let hasLoadedDocuments = false;
+  let disposed = false;
 
   const showUploadMessage = (message, kind = "info") => {
     uploadStatus.replaceChildren(createNotice(message, kind));
   };
 
   async function refreshCapabilities() {
+    capabilities.replaceChildren(createNotice("正在加载运行能力…", "info"));
     try {
       const health = await getCapabilities();
+      if (disposed) return;
       const values = [
         ["MinerU", health.capabilities?.mineru, "用于 PDF 与图片解析"],
         ["LibreOffice", health.capabilities?.libreoffice, "用于 Office 文档转换"],
@@ -67,13 +71,16 @@ export function createDocumentsPage() {
         return item;
       }));
     } catch (error) {
-      capabilities.replaceChildren(createNotice(`无法获取运行能力：${error.message}`));
+      if (!disposed) capabilities.replaceChildren(createNotice(`无法获取运行能力：${error.message}`));
     }
   }
 
   async function refreshDocuments() {
-    if (isRefreshing) return;
+    if (isRefreshing || disposed) return;
     isRefreshing = true;
+    if (!hasLoadedDocuments) {
+      documentStatusNode.replaceChildren(createNotice("正在加载文档列表…", "info"));
+    }
     try {
       const response = await listDocuments();
       const records = await Promise.all((response.items || []).map(async (record) => {
@@ -84,11 +91,14 @@ export function createDocumentsPage() {
           return record;
         }
       }));
-      renderDocuments(records);
-      documentStatusNode.replaceChildren();
+      if (!disposed) {
+        renderDocuments(records);
+        documentStatusNode.replaceChildren();
+      }
     } catch (error) {
-      documentStatusNode.replaceChildren(createNotice(`无法加载文档列表：${error.message}`));
+      if (!disposed) documentStatusNode.replaceChildren(createNotice(`无法加载文档列表：${error.message}`));
     } finally {
+      hasLoadedDocuments = true;
       isRefreshing = false;
     }
   }
@@ -179,7 +189,13 @@ export function createDocumentsPage() {
   refreshCapabilities();
   refreshDocuments();
   timerId = window.setInterval(refreshDocuments, 3000);
-  return { element: page, dispose: () => window.clearInterval(timerId) };
+  return {
+    element: page,
+    dispose: () => {
+      disposed = true;
+      window.clearInterval(timerId);
+    },
+  };
 }
 
 function formatBytes(bytes) {
