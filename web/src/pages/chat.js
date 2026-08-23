@@ -1,4 +1,4 @@
-import { streamQuery } from "../api/client.js";
+import { streamQuery, uploadQueryImage } from "../api/client.js";
 import { createCitations } from "../components/citations.js";
 import { createNotice } from "../components/layout.js";
 
@@ -19,6 +19,8 @@ export function createChatPage() {
     <form class="chat-form">
       <label>检索模式<select name="mode"></select></label>
       <label>问题<textarea name="query" rows="4" required maxlength="20000" placeholder="例如：请概括已上传文档中的关键结论。"></textarea></label>
+      <label>查询图片（可选）<input name="image" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,image/tiff" /></label>
+      <p class="muted">选择图片后，浏览器会先上传并取得服务端路径，再开始多模态问答。</p>
       <div class="chat-error"></div><button class="button button--primary" type="submit">发送问题</button>
     </form>`;
 
@@ -32,12 +34,14 @@ export function createChatPage() {
   const form = page.querySelector(".chat-form");
   const input = page.querySelector("textarea[name=query]");
   const messages = page.querySelector(".message-list");
+  const imageInput = page.querySelector("input[name=image]");
   const errorBox = page.querySelector(".chat-error");
   const submit = form.querySelector("button[type=submit]");
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const query = input.value.trim();
+    const image = imageInput.files?.[0];
     if (!query) return;
     errorBox.replaceChildren();
     appendMessage(messages, "question", query);
@@ -46,10 +50,20 @@ export function createChatPage() {
     let citations = [];
     submit.disabled = true;
     input.disabled = true;
+    imageInput.disabled = true;
     form.setAttribute("aria-busy", "true");
     try {
+      let endpoint = "query";
+      const payload = { query, mode: selector.value };
+      if (image) {
+        answer.textContent = "正在上传查询图片…";
+        const uploaded = await uploadQueryImage(image);
+        payload.multimodal_content = [{ type: "image", img_path: uploaded.img_path }];
+        endpoint = "query/multimodal";
+        answer.textContent = "正在检索并生成回答…";
+      }
       await streamQuery(
-        { query, mode: selector.value },
+        payload,
         {
           delta: (data) => {
             answerText += data.text || "";
@@ -61,6 +75,7 @@ export function createChatPage() {
           },
           error: (data) => { throw new Error(data.message || "回答生成失败"); },
         },
+        endpoint,
       );
       answer.after(createCitations(citations));
     } catch (error) {
@@ -69,8 +84,10 @@ export function createChatPage() {
     } finally {
       submit.disabled = false;
       input.disabled = false;
+      imageInput.disabled = false;
       form.removeAttribute("aria-busy");
       input.value = "";
+      imageInput.value = "";
       input.focus();
     }
   });

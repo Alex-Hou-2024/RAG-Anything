@@ -65,8 +65,8 @@ export function publicApi(path, options = {}) {
  * All query routes flow through apiUrl, so a production build does not need a
  * Vite development proxy.
  */
-export async function streamQuery(payload, handlers = {}) {
-  const response = await fetchResponse(apiUrl("query"), {
+export async function streamQuery(payload, handlers = {}, endpoint = "query") {
+  const response = await fetchResponse(apiUrl(endpoint), {
     method: "POST",
     headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, stream: true }),
@@ -112,4 +112,13 @@ function parseSseEvent(block) {
   } catch {
     return null;
   }
+}
+
+export async function uploadQueryImage(file) {
+  if (!(file instanceof File) || !file.type.startsWith("image/")) {
+    throw new TypeError("请选择有效的图片文件");
+  }
+  const body = new FormData();
+  body.append("image", file, file.name);
+  return api("query/multimodal/images", { method: "POST", body });
 }
