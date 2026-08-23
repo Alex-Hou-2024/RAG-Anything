@@ -1,99 +1,67 @@
-# RAG-Anything unified web deployment plan (issues #19–#26)
+# RAG-Anything Web/API delivery plan (issues #28–#32)
 
-## Target architecture
+## Target architecture and layout
 
-One FastAPI/uvicorn process owns the public application.  It serves the built
-single-page frontend, the existing RAG-Anything API, and (when available) the
-LightRAG WebUI.  There is no authentication, login route, session state, or
-separate Node runtime in production.
+A production Vite frontend lives in `web/` and is built once into `web/dist`.
+FastAPI remains the only runtime process: `api/main.py` exposes `/healthz`,
+mounts all application routers beneath `/api`, serves immutable frontend assets
+from `web/dist`, and falls back to `web/dist/index.html` for browser routes.
 
 ```
-api/
-  main.py                 # app factory/lifespan; API routers; static SPA; /lightrag mount
-  config.py               # single environment-backed runtime configuration
-  deps.py                 # creates the one RAGAnything/LightRAG-backed service
-  routers/
-    documents.py          # upload, list, status and delete
-    query.py              # text and multimodal query contracts
-  services/
-    rag.py                # shared RAG facade and LightRAG-compatible configuration
-    query.py              # query validation/adaptation and answer/citation streaming
-  middleware/
-    lightrag_write_guard.py # blocks LightRAG text-only write endpoints
 web/
-  package.json, vite.config.*  # reproducible production build under web/dist
+  package.json, vite.config.* , index.html  # Vite build; output is dist/
   src/
-    main.* and router.*        # /documents and /chat routes; / redirects to /documents
-    api/                       # shared fetch, SSE and upload clients plus DTOs
-    pages/documents/           # ingest UI, polling, errors and capability indicators
-    pages/chat/                # modes, image upload, streaming answers and citations
-    components/                # navigation (including knowledge graph), shared UI/styles
-tests/api/                # request/schema/config and LightRAG-mount/guard tests
-tests/e2e/                # browser flow with a fixture multimodal PDF
+    main.*                                  # application bootstrap/router
+    api/client.*                            # base URL, fetch/SSE, shared error type
+    api/types.*                             # document, health, query DTOs
+    pages/documents/*, pages/chat/*         # loading/error-aware feature views
+api/
+  config.py                                 # validated environment Settings
+  main.py                                   # app factory, /api routes, static SPA
+  routers/documents.py, routers/query.py   # existing domain endpoints, prefixed by app
+  services/*                                # ingestion/query implementation
+scripts/
+  start.sh                                  # validated self-hosted build/start helper
+docs/ or README.md                          # deployment and E2E procedure
 ```
 
-The root static handler serves the SPA entry for client routes and sends `/` to
-the documents screen; it must not retain the current marketing HTML, auth
-redirect, or its static-hosting exception.  Assets are served without an
-Origin gate.  Proxy-aware public URLs/origin checks use `X-Forwarded-Host` and
-`X-Forwarded-Proto` (or `ALLOWED_CORS_ORIGIN`), never the rewritten `Host`.
+## Shared contracts and decisions
 
-## Shared contracts and configuration
+- `VITE_API_BASE_URL` is the sole browser API base. It defaults to `/api`, so
+  both local production and cross-origin deployments work without a dev proxy
+  or a hard-coded localhost URL.
+- The API client owns JSON/error decoding, request cancellation where needed,
+  multipart upload, health checks, and SSE query parsing. Pages consume typed
+  `Document`, `DocumentList`, `Health`, `QueryRequest`, and query event
+  contracts and render consistent loading/error states.
+- Keep `GET /healthz` at its current public path. Document and query routes
+  move from `/documents` and `/query` to `/api/documents` and `/api/query`.
+- SPA fallback must be registered after explicit API and health routes; static
+  JS/CSS must never be Origin-gated. CORS accepts the platform-provided
+  `ALLOWED_CORS_ORIGIN` (and proxy-aware public host handling if an origin
+  comparison is required), never the rewritten raw `Host`.
+- `Settings` is the single source of environment configuration. Startup
+  validates required secrets/settings with actionable messages and creates
+  `RAG_WORKING_DIR` and `RAG_OUTPUT_DIR` before RAG initialization.
 
-- Keep document lifecycle endpoints as the source of truth: upload accepts a
-  file and returns its server-managed document/artifact path; `GET
-  /documents/{id}/status` provides state/error for polling.
-- Define multimodal content around `img_path`.  The chat client uploads its
-  image first, receives a server-accessible path, then posts it to `POST
-  /query/multimodal`.  The backend accepts legacy `image_data` only through an
-  explicit compatibility/validation branch and returns stable 4xx errors for
-  empty, missing, inaccessible, or malformed fields.
-- `Settings` is the one environment source.  Map its working directory,
-  parser/output settings, LLM, vision and embedding settings into
-  `RAGAnythingConfig` and the LightRAG WebUI/server creation so all use one
-  persistent LightRAG store, vectors and graph.  Retire or alias the duplicate
-  `WORKING_DIR`/`OUTPUT_DIR`/`PARSER` environment paths rather than letting
-  them drift from `RAG_*` settings.
-- Frontend API DTOs mirror the FastAPI payloads.  The shared client normalizes
-  API errors and parses typed SSE `delta`, `citations`, `done`, and `error`
-  events.  Citations retain source/document information for display.
-- The LightRAG integration is optional at runtime: probe package/static assets
-  during lifespan/startup.  If absent, do not render the knowledge-graph link
-  and report `lightrag_webui: false` in `/healthz`; do not expose a broken 404
-  route.  If present, mount under `/lightrag` with its static base/API prefix
-  rewritten for that subpath.
-- `/lightrag` is read-only in this deployment.  Hide its import controls where
-  supported; independently intercept its document insertion/upload/write
-  methods in middleware and return a clear response directing users to the
-  main documents screen.
+## Issue order and dependencies
 
-## Delivery order and issue dependencies
+1. **#28** creates the Vite entrypoint, source root, deterministic `web/dist`
+   output, and documents `VITE_API_BASE_URL` in `.env.example`.
+2. **#29** depends on #28: replace direct page `fetch` calls with the shared
+   client and point upload, status/list/delete, query/retrieval, and health
+   calls at the configured API base.
+3. **#30** depends on #28: prefix routers with `/api`, serve `web/dist`, and
+   add safe SPA fallback while preserving `/healthz`.
+4. **#31** is compatible with #28/#30 and must complete before deployment:
+   finalize `.env.example`, validation, and durable-directory creation.
+5. **#32** depends on #30 and #31: document and script `npm run build`,
+   `pip install -e .`, then `uvicorn api.main:app --host 0.0.0.0 --port 8080`;
+   verify health, SPA loading, and upload → parse → retrieval end to end.
 
-1. **#19** Remove the landing page/auth redirect and make `/` enter document
-   management.  This clears the prerequisite for the SPA.
-2. **#20** Introduce the maintained `web/` project, shared client/routing,
-   Chinese responsive Documents and Chat UI, then build it into FastAPI static
-   assets.  It depends on #19.
-3. **#21** Replace browser base64 `image_data` posting with upload-plus-
-   `img_path`; add backend compatibility validation and API tests.  It depends
-   on #20.
-4. **#22** Consolidate API/library/LightRAG storage and model configuration,
-   document all variables in `.env.example`.  This is required before sharing
-   the graph UI.
-5. **#23** Mount the verified optional LightRAG WebUI at `/lightrag`, including
-   a capability-aware frontend navigation entry.  It depends on #22.
-6. **#24** Apply the UI suppression and server-side write guard to that mount.
-   It depends on #23.
-7. **#25** Document/build the single-uvicorn deployment, Python 3.10+ and
-   optional MinerU/LibreOffice requirements.  It depends on #20 and #23.
-8. **#26** Run browser/API E2E coverage for no-auth root access, multimodal PDF
-   upload to `ready`, cited chat answer, graph visibility, and absence of the
-   former `invalid_request` auth behavior.  It depends on #21, #24 and #25.
+## Verification boundaries
 
-## Key checks
-
-Build the frontend before deployment (no development server); start only
-`uvicorn api.main:app`.  API tests mock RAG/LightRAG availability, file paths,
-and streaming.  E2E uses a fixture PDF with both image and table and skips or
-marks the graph assertion only when `/healthz` explicitly declares the optional
-WebUI unavailable.
+Unit/API tests cover API prefixes, configuration failures/directory creation,
+static asset and SPA fallback precedence, and client error/SSE behavior. The
+self-hosted E2E check uses the built frontend and an actual sample document,
+waits for its terminal parse state, then confirms a retrieval answer.

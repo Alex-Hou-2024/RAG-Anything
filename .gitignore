@@ -95,15 +95,3 @@ node_modules/
 
 # Keep the committed configuration template available for deployment.
 !.env.example
-
-# Prescribed autonomous workspace state (never commit)
-.gh_token
-.database_url
-.task_id
-.container_name
-.app_name
-.gh_user
-.github_token
-.pipeline-state.json
-.gitkeep
-.progress
