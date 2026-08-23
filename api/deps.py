@@ -36,6 +36,10 @@ class RAGService:
 
     async def initialize(self) -> None:
         """Construct the singleton while preserving health diagnostics on failure."""
+        if not self.settings.openai_api_key:
+            self.initialization_error = "RAG backend is unavailable because OPENAI_API_KEY is not configured"
+            logger.warning("RAG backend disabled: OPENAI_API_KEY is not configured")
+            return
         try:
             self.instance = self.factory(self.settings)
             initializer = getattr(self.instance, "_ensure_lightrag_initialized", None)
