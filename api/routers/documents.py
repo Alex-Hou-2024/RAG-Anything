@@ -25,6 +25,11 @@ def _not_found() -> HTTPException:
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def create_document(request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
     """Accept a multipart file or an application/json pre-parsed content list."""
+    if not request.app.state.rag_service.is_ready:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RAG backend is unavailable; configure a valid OPENAI_API_KEY before ingesting documents",
+        )
     service = _service(request)
     content_type = request.headers.get("content-type", "").lower()
     try:

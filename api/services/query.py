@@ -48,6 +48,8 @@ class QueryService:
 
     async def save_query_image(self, upload: UploadFile) -> str:
         """Store an uploaded query image and return its absolute server path."""
+        if not self.rag_service.is_ready:
+            raise QueryError("RAG backend is unavailable; configure a valid OPENAI_API_KEY before querying")
         suffix = self._image_suffix(upload.filename, upload.content_type)
         if suffix is None:
             raise QueryInputError("只能上传 PNG、JPEG、GIF、WebP、BMP 或 TIFF 图片")
