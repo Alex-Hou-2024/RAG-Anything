@@ -3,7 +3,7 @@ const NAVIGATION = [
   ["/chat", "对话问答"],
 ];
 
-export function createLayout(activePath, content) {
+export function createLayout(activePath, content, lightragAvailable = false) {
   const shell = document.createElement("div");
   shell.className = "app-shell";
 
@@ -18,10 +18,11 @@ export function createLayout(activePath, content) {
 
   const nav = document.createElement("nav");
   nav.setAttribute("aria-label", "主导航");
-  for (const [path, label] of NAVIGATION) {
+  const navigation = lightragAvailable ? [...NAVIGATION, ["/lightrag", "知识图谱"]] : NAVIGATION;
+  for (const [path, label] of navigation) {
     const link = document.createElement("a");
     link.href = path;
-    link.dataset.route = "";
+    if (path !== "/lightrag") link.dataset.route = "";
     link.textContent = label;
     if (path === activePath) link.setAttribute("aria-current", "page");
     nav.append(link);
