@@ -8,6 +8,7 @@ SQLAlchemy>=2.0,<3
 psycopg[binary]>=3.2,<4
 pydantic>=2,<3
 Pillow>=10.0.0
+pypdf>=5,<6
 python-dotenv>=1.0,<2
 huggingface_hub
 lightrag-hku<1.5

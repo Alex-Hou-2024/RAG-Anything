@@ -168,7 +168,7 @@ class Settings:
             # these locations.
             rag_working_dir=_persistent_directory("RAG_WORKING_DIR", "/data/rag_storage"),
             rag_output_dir=_persistent_directory("RAG_OUTPUT_DIR", "/data/output"),
-            rag_parser=_get_env("RAG_PARSER", "mineru") or "mineru",
+            rag_parser=_get_env("RAG_PARSER", "auto") or "auto",
             rag_parse_method=_get_env("RAG_PARSE_METHOD", "auto") or "auto",
             database_url=_get_env("DATABASE_URL"),
             object_storage_endpoint=_get_env("OBJECT_STORAGE_ENDPOINT"),

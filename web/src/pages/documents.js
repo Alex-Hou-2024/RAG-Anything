@@ -41,6 +41,7 @@ export function createDocumentsPage({ ragAvailable = false } = {}) {
 
   const capabilities = page.querySelector(".capability-list");
   const dropZone = page.querySelector(".drop-zone");
+  const uploadHelp = page.querySelector("#upload-help");
   const fileInput = page.querySelector(".file-input");
   const uploadStatus = page.querySelector(".upload-status");
   const documentStatusNode = page.querySelector(".document-status");
@@ -66,10 +67,23 @@ export function createDocumentsPage({ ragAvailable = false } = {}) {
     try {
       const health = await getCapabilities();
       if (disposed) return;
+      const parser = health.capabilities?.parser;
+      const degraded = Boolean(health.capabilities?.parser_degraded);
+      const limitations = health.capabilities?.parser_limitations || [];
       const values = [
         ["MinerU", health.capabilities?.mineru, "用于 PDF 与图片解析"],
         ["LibreOffice", health.capabilities?.libreoffice, "用于 Office 文档转换"],
+        [
+          "文档解析",
+          !degraded,
+          degraded
+            ? `当前使用基础解析（${parser || "python"}）：${limitations.join(" ")}`
+            : `当前使用 ${parser || "MinerU"}，支持 OCR、版面与表格结构解析`,
+        ],
       ];
+      if (!health.capabilities?.libreoffice) {
+        uploadHelp.textContent = "支持 PDF 与图片；当前环境不支持 Office 文件，请转为 PDF 后上传。单个文件最大 100 MB。";
+      }
       capabilities.replaceChildren(...values.map(([name, available, note]) => {
         const item = document.createElement("div");
         item.className = "capability";

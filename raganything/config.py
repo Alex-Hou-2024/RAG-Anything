@@ -26,8 +26,8 @@ class RAGAnythingConfig:
     parser_output_dir: str = field(default=get_env_value("RAG_OUTPUT_DIR", "./output", str))
     """Default output directory for parsed content."""
 
-    parser: str = field(default=get_env_value("RAG_PARSER", "mineru", str))
-    """Parser selection: 'mineru', 'docling', or 'paddleocr'."""
+    parser: str = field(default=get_env_value("RAG_PARSER", "auto", str))
+    """Parser selection; ``auto`` prefers MinerU then uses the base Python parser."""
 
     display_content_stats: bool = field(
         default=get_env_value("DISPLAY_CONTENT_STATS", True, bool)
