@@ -1311,3 +1311,20 @@ If you find RAG-Anything useful in your research, please cite our paper:
 
 ## Self-hosted API verification
 Copy `.env.example` to `.env`, set runtime secrets and persistent `RAG_WORKING_DIR`, `DATABASE_URL`, and `OBJECT_STORAGE_*`, then run `uvicorn api.main:app --host 0.0.0.0 --port 8080`. Verify upload, status, query, and restart persistence as described in `tests/e2e/README.md`.
+
+## 单进程 Web 部署
+
+此 Web 部署只运行 **一个** Uvicorn 进程：同一进程提供 `/api/documents`、`/api/query`、`/healthz`、Vite 构建产物，以及（安装包提供静态资源时）只读的 `/lightrag` 图谱页面；不需要也不要启动独立的前端服务。
+
+**要求：** Python **3.10 或更高版本**、Node.js 18+（仅用于构建前端）。MinerU 是 PDF/图片解析的可选能力；LibreOffice 是 Office 文档导入的可选系统依赖。缺少它们时 `/healthz` 会报告相应能力不可用。
+
+```bash
+cp .env.example .env
+# 在 .env 中填写真实 OPENAI_API_KEY，并将 RAG_WORKING_DIR / RAG_OUTPUT_DIR 挂载到持久化磁盘
+npm --prefix web ci
+npm --prefix web run build
+python -m pip install -e .
+uvicorn api.main:app --host 0.0.0.0 --port 8080 --workers 1
+```
+
+部署后访问根路径进入文档管理页；问答页为 `/chat`。若 `/healthz` 的 `lightrag_webui` 为 `true`，可在导航中打开 `/lightrag`；该页面仅用于图谱可视化和调试，文档入库必须在主界面完成。
