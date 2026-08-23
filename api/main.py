@@ -13,8 +13,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import Settings, get_settings
 from .deps import RAGFactory, RAGService, create_rag_anything
@@ -25,6 +26,32 @@ from .services.query import QueryService
 from .services.capabilities import detect_capabilities
 
 logger = logging.getLogger("api")
+
+
+class SPAStaticFiles(StaticFiles):
+    """Serve Vite assets and use its entry document for client-side routes."""
+
+    def __init__(self, *, index_file: Path, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.index_file = index_file
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as error:
+            if error.status_code != status.HTTP_404_NOT_FOUND:
+                raise
+            response = Response(status_code=status.HTTP_404_NOT_FOUND)
+
+        # Vite emits every immutable bundle under /assets. Never return HTML for
+        # a missing bundle: browsers would otherwise fail with an opaque MIME error.
+        if response.status_code != status.HTTP_404_NOT_FOUND or path.startswith("assets/"):
+            return response
+
+        if scope["method"] not in {"GET", "HEAD"}:
+            return response
+
+        return FileResponse(self.index_file)
 
 
 def configure_logging(level: str) -> None:
@@ -84,8 +111,10 @@ def create_app(
         version="1.0.0",
         lifespan=lifespan,
     )
-    app.include_router(documents_router)
-    app.include_router(query_router)
+    # The browser uses the same-origin /api base configured by the Vite build.
+    # Keep health at its established public path below.
+    app.include_router(documents_router, prefix="/api")
+    app.include_router(query_router, prefix="/api")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(app_settings.allowed_cors_origins),
@@ -100,15 +129,7 @@ def create_app(
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         started_at = time.perf_counter()
         try:
-            accepts_html = "text/html" in request.headers.get("accept", "")
-            if (
-                request.method == "GET"
-                and request.url.path in {"/", "/documents", "/chat"}
-                and accepts_html
-            ):
-                response = FileResponse(web_index)
-            else:
-                response = await call_next(request)
+            response = await call_next(request)
         except Exception:
             # The exception handler logs stack details before sending the generic
             # error response; this preserves a request-level trace as well.
@@ -171,9 +192,19 @@ def create_app(
             },
         }
 
-    # Explicit API routes remain ahead of this static mount.  HTML navigation
-    # above receives the SPA entry while API fetches request JSON explicitly.
-    app.mount("/", StaticFiles(directory=web_root, html=True), name="web")
+    @app.api_route("/api", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+    @app.api_route("/api/{api_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+    async def unknown_api_route(api_path: str = "") -> None:
+        """Return JSON 404s for unknown API routes instead of the SPA document."""
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API route not found")
+
+    # Register the static application last: explicit health and /api routes
+    # therefore cannot be shadowed by the client-side history fallback.
+    app.mount(
+        "/",
+        SPAStaticFiles(directory=web_root, html=True, index_file=web_index),
+        name="web",
+    )
 
     return app
 
