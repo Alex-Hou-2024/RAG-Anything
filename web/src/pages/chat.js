@@ -10,7 +10,7 @@ const MODES = [
   ["mix", "混合模式"],
 ];
 
-export function createChatPage() {
+export function createChatPage({ ragAvailable = false } = {}) {
   const page = document.createElement("section");
   page.className = "page page--chat";
   page.innerHTML = `
@@ -38,8 +38,17 @@ export function createChatPage() {
   const errorBox = page.querySelector(".chat-error");
   const submit = form.querySelector("button[type=submit]");
 
+  if (!ragAvailable) {
+    selector.disabled = true;
+    input.disabled = true;
+    imageInput.disabled = true;
+    submit.disabled = true;
+    errorBox.replaceChildren(createNotice("问答已暂停：管理员尚未配置 RAG 模型凭据。", "info"));
+  }
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!ragAvailable) return;
     const query = input.value.trim();
     const image = imageInput.files?.[0];
     if (!query) return;

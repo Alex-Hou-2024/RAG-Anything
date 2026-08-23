@@ -16,7 +16,7 @@ const STATUS_LABELS = {
   failed: "处理失败",
 };
 
-export function createDocumentsPage() {
+export function createDocumentsPage({ ragAvailable = false } = {}) {
   const page = document.createElement("section");
   page.className = "page page--documents";
   page.innerHTML = `
@@ -53,6 +53,13 @@ export function createDocumentsPage() {
   const showUploadMessage = (message, kind = "info") => {
     uploadStatus.replaceChildren(createNotice(message, kind));
   };
+
+  if (!ragAvailable) {
+    dropZone.setAttribute("aria-disabled", "true");
+    dropZone.tabIndex = -1;
+    fileInput.disabled = true;
+    showUploadMessage("文档上传已暂停：管理员尚未配置 RAG 模型凭据。", "info");
+  }
 
   async function refreshCapabilities() {
     capabilities.replaceChildren(createNotice("正在加载运行能力…", "info"));
@@ -151,6 +158,7 @@ export function createDocumentsPage() {
   }
 
   async function submitFiles(files) {
+    if (!ragAvailable) return;
     const selected = [...files].filter(Boolean);
     if (!selected.length) return;
     dropZone.setAttribute("aria-busy", "true");
@@ -169,11 +177,11 @@ export function createDocumentsPage() {
     }
   }
 
-  dropZone.addEventListener("click", () => fileInput.click());
+  dropZone.addEventListener("click", () => { if (ragAvailable) fileInput.click(); });
   dropZone.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      fileInput.click();
+      if (ragAvailable) fileInput.click();
     }
   });
   fileInput.addEventListener("change", () => submitFiles(fileInput.files));

@@ -162,8 +162,12 @@ class Settings:
             embedding_base_url=_get_env("EMBEDDING_BASE_URL", "https://api.openai.com/v1")
             or "https://api.openai.com/v1",
             embedding_dimension=_get_int("EMBEDDING_DIMENSION", 1536),
-            rag_working_dir=_persistent_directory("RAG_WORKING_DIR", "./rag_storage"),
-            rag_output_dir=_persistent_directory("RAG_OUTPUT_DIR", "./output"),
+            # Sprite's application directory is replaced on deploy. Keep the
+            # RAG index, uploaded files, and parser output on its durable
+            # volume unless a self-hosted installation explicitly overrides
+            # these locations.
+            rag_working_dir=_persistent_directory("RAG_WORKING_DIR", "/data/rag_storage"),
+            rag_output_dir=_persistent_directory("RAG_OUTPUT_DIR", "/data/output"),
             rag_parser=_get_env("RAG_PARSER", "mineru") or "mineru",
             rag_parse_method=_get_env("RAG_PARSE_METHOD", "auto") or "auto",
             database_url=_get_env("DATABASE_URL"),
