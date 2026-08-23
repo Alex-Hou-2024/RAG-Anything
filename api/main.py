@@ -20,6 +20,7 @@ from .routers.documents import router as documents_router
 from .routers.query import router as query_router
 from .services.ingest import IngestService
 from .services.query import QueryService
+from .services.capabilities import detect_capabilities
 
 logger = logging.getLogger("api")
 
@@ -65,6 +66,7 @@ def create_app(
         app.state.rag_service = service
         app.state.ingest_service = IngestService(app_settings, service)
         app.state.query_service = QueryService(service)
+        app.state.capabilities = detect_capabilities()
         await service.initialize()
         yield
         await service.shutdown()
@@ -146,6 +148,7 @@ def create_app(
         return {
             "status": "ok" if service.is_ready else "degraded",
             "service": "RAG-Anything",
+            "capabilities": request.app.state.capabilities.public(),
             "rag": {
                 "initialized": service.is_ready,
                 "error": service.initialization_error,
