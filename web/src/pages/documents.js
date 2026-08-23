@@ -76,6 +76,7 @@ export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {
       const details = health.capability_details || {};
       const rag = health.rag || {};
       const parser = details.parser || {};
+      const modelProbes = health.model_probes || {};
       const values = [
         [
           "RAG 服务",
@@ -86,6 +87,9 @@ export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {
         ],
         ["MinerU", details.mineru?.available, `${details.mineru?.reason || "状态未知"} ${details.mineru?.impact || ""}`],
         ["LibreOffice", details.libreoffice?.available, `${details.libreoffice?.reason || "状态未知"} ${details.libreoffice?.impact || ""}`],
+        ["对话模型", modelProbes.chat?.available, modelProbes.chat?.reason || "尚未完成探活。"],
+        ["视觉模型", modelProbes.vision?.available, modelProbes.vision?.reason || "尚未完成探活。"],
+        ["嵌入模型", modelProbes.embedding?.available, modelProbes.embedding?.reason || "尚未完成探活。"],
         [
           "当前解析器",
           !parser.degraded,
@@ -102,7 +106,8 @@ export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {
         const title = document.createElement("strong");
         title.textContent = name;
         const badge = document.createElement("span");
-        badge.className = `badge badge--${available ? "ready" : "muted"}`;
+        const modelUnavailable = name.endsWith("模型") && !available;
+        badge.className = `badge badge--${available ? "ready" : modelUnavailable ? "failed" : "muted"}`;
         badge.textContent = state;
         const description = document.createElement("small");
         description.textContent = note.trim();

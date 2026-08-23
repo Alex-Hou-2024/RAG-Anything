@@ -34,6 +34,8 @@ def test_health_payload_explains_degraded_runtime() -> None:
     assert payload["capability_details"]["parser"]["effective"] == "python"
     assert "OCR" in payload["capability_details"]["parser"]["impact"]
     assert "PDF 和图片不受影响" in payload["capability_details"]["libreoffice"]["impact"]
+    assert payload["model_probes"]["chat"]["available"] is False
+    assert "尚未初始化" in payload["model_probes"]["vision"]["reason"]
 
 
 def test_health_payload_reports_ready_rag() -> None:
@@ -47,6 +49,28 @@ def test_health_payload_reports_ready_rag() -> None:
     assert payload["status"] == "ok"
     assert payload["rag"]["initialized"] is True
     assert payload["capability_details"]["mineru"]["available"] is True
+
+
+def test_health_payload_exposes_cached_model_probe_results() -> None:
+    service = SimpleNamespace(
+        is_ready=True,
+        initialization_error=None,
+        initialization_code=None,
+        model_probes={
+            "chat": {"available": True, "reason": "模型响应正常。", "checked_at": "2026-01-01T00:00:00+00:00"},
+            "vision": {"available": False, "reason": "模型服务请求超时，请检查网络和服务可达性。", "checked_at": "2026-01-01T00:00:00+00:00"},
+            "embedding": {"available": True, "reason": "模型响应正常。", "checked_at": "2026-01-01T00:00:00+00:00"},
+        },
+    )
+    payload = build_health_payload(
+        service=service,
+        capabilities=Capabilities(True, True, "mineru", False, ()),
+        lightrag_webui_available=True,
+    )
+
+    assert payload["model_probes"]["chat"]["available"] is True
+    assert payload["model_probes"]["vision"]["available"] is False
+    assert "超时" in payload["model_probes"]["vision"]["reason"]
 
 
 def test_health_payload_explains_unavailable_persistent_storage() -> None:

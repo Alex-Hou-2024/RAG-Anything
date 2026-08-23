@@ -11,6 +11,22 @@ from api.services.capabilities import Capabilities
 
 router = APIRouter(tags=["health"])
 
+_MODEL_PROBE_NAMES = {"chat": "对话", "vision": "视觉", "embedding": "嵌入"}
+
+
+def _model_probe_payload(service: RAGService) -> dict[str, dict[str, str | bool | None]]:
+    """Normalize cached probes for clients without ever invoking a model."""
+    cached = getattr(service, "model_probes", {}) or {}
+    unavailable_reason = "RAG 服务尚未初始化，无法执行模型探活。"
+    return {
+        name: {
+            "available": bool(cached.get(name, {}).get("available", False)),
+            "reason": cached.get(name, {}).get("reason", unavailable_reason),
+            "checked_at": cached.get(name, {}).get("checked_at"),
+        }
+        for name in _MODEL_PROBE_NAMES
+    }
+
 
 def _availability(
     available: bool, *, available_detail: str, unavailable_reason: str, unavailable_impact: str
@@ -65,6 +81,9 @@ def build_health_payload(
             },
         },
         "lightrag_webui": lightrag_webui_available,
+        # The service populated this cache at startup.  Keeping this builder
+        # read-only ensures frequent health checks do not incur model costs.
+        "model_probes": _model_probe_payload(service),
         "rag": {
             "initialized": rag_ready,
             "error": rag_error,
