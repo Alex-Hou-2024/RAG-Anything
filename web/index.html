@@ -1,17 +1,14 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="RAG-Anything 文档管理" />
-    <title>RAG-Anything 文档管理</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="多模态文档管理与检索问答" />
+    <title>文档知识库</title>
+    <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <main id="app" aria-live="polite">正在加载文档管理…</main>
-    <script type="module">
-      import { mountDocuments } from "/pages/documents/index.js";
-
-      mountDocuments(document.getElementById("app"));
-    </script>
+    <div id="app" class="app-shell"></div>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>
