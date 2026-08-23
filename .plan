@@ -1,0 +1,140 @@
+# RAG-Anything Web Service Architecture Plan
+
+## Goal
+Add a deployable FastAPI API and a small web application around the existing
+`raganything` library. The service must retain document metadata, original and
+derived artifacts, and the RAG work directory across restarts while gracefully
+handling parser capabilities that may be unavailable in a self-hosted runtime.
+
+## Proposed module and file layout
+
+```
+api/
+  __init__.py
+  main.py                 # app factory, lifespan, CORS, router registration, errors
+  config.py               # typed environment settings and validation
+  deps.py                 # cached Settings, DB session, RAG service dependencies
+  schemas.py              # shared Pydantic request/response models and enums
+  db.py                   # SQLAlchemy engine/session lifecycle
+  models.py               # Document ORM model; Alembic metadata
+  routers/
+    health.py             # GET /healthz
+    documents.py          # upload/content-list import, list/status/delete
+    query.py              # text and multimodal query, normal and SSE responses
+  services/
+    capabilities.py       # MinerU/LibreOffice probes and supported-format policy
+    storage.py            # object-storage adapter for originals and derived artifacts
+    ingest.py             # durable state machine and background parse/index workflow
+    rag.py                # one lifespan-owned RAGAnything facade
+    query.py              # retrieval, citations, stream-to-SSE adaptation
+  errors.py               # domain errors -> stable API error payloads
+  logging.py              # structured logging setup
+migrations/               # Alembic configuration and document-table revisions
+web/
+  package.json
+  src/
+    api-client/           # typed HTTP/SSE client and API DTO mapping
+    pages/documents/      # upload/drop zone, list, poll status, delete, capabilities
+    pages/chat/           # responsive chat, mode selector, image upload, streaming UI
+    components/Citations/ # expandable citation source renderers
+    shared/               # routing, layout, state and styles
+  tests/
+tests/
+  api/                    # API/service unit and integration tests
+  e2e/                    # self-hosted end-to-end flow
+.env.example              # only non-secret example values; tracked
+```
+
+The existing `raganything/` package remains the multimodal processing and
+retrieval implementation; `api/services/rag.py` is its boundary so HTTP,
+persistence, and frontend code do not call it directly.
+
+## Shared data contracts
+
+- `DocumentStatus`: `pending`, `parsing`, `indexing`, `ready`, `failed`.
+- `Document`: UUID `id`, original filename, MIME/type, byte size, object key,
+  parsed-artifact prefix, status, human-readable `error_message`, timestamps,
+  and optional RAG/index identifier.
+- Upload returns `DocumentAccepted { document_id, status }`; status/list return
+  `DocumentSummary`; delete is idempotent where feasible.
+- `ContentListImportRequest` explicitly identifies pre-parsed content and uses
+  the same document lifecycle, preserving the capability-independent path.
+- `QueryRequest { query, mode, stream }` and `MultimodalQueryRequest` share
+  `QueryResponse { answer, citations }`; each citation identifies document,
+  content kind, stable fragment/artifact id, preview/locator, and optional
+  object-storage reference. Streaming emits typed SSE events (`delta`,
+  `citations`, `done`, `error`) that assemble to the same final shape.
+- All errors use a single JSON envelope with machine-readable `code`, message,
+  and optional details. Validation remains FastAPI/Pydantic-native but is
+  normalized by a global handler.
+
+## Runtime and persistence decisions
+
+1. Use FastAPI lifespan to create one settings object, DB engine, object storage
+   client, capability snapshot, and one `RAGAnything` facade per process; store
+   them on `app.state` and access them through dependency functions.
+2. Use Postgres via `DATABASE_URL` for metadata/status. Add Alembic migrations
+   rather than creating schema implicitly in request paths. Use a filesystem or
+   S3-compatible object-store abstraction configured with `OBJECT_STORAGE_*`;
+   production artifacts never live only in request temp directories.
+3. Configure the RAG/LightRAG working directory with a persistent
+   `RAG_WORKING_DIR`. It is initialized once and reused after restart; document
+   state is durable even if a worker fails mid-ingest.
+4. Start parsing with FastAPI `BackgroundTasks` (or an injected in-process task
+   runner) and make state transitions atomic and observable. Catch every task
+   exception, log it, and write `failed` plus a safe actionable error message;
+   request-serving remains alive.
+5. Capability probing happens at startup and is exposed in `/healthz`.
+   MinerU absence selects a PDF/image fallback; LibreOffice absence rejects
+   Office uploads early with an explicit `unsupported_format` error. Content
+   list import never depends on either tool.
+6. Query code translates RAGAnything outputs into stable citations. If the RAG
+   backend cannot stream, it returns one response/SSE completion rather than
+   failing. SSE uses standard `text/event-stream` and handles client
+   disconnects/cancellation.
+7. CORS is driven by `ALLOWED_CORS_ORIGIN` (plus development origins). Never
+   validate browser/static asset origins against the rewritten internal `Host`;
+   use `X-Forwarded-Host`/`X-Forwarded-Proto` for public-origin derivation when
+   needed.
+8. Keep API and web DTOs synchronized from the `api/schemas.py` contracts;
+   frontend types may be generated or maintained as a thin explicit mirror.
+
+## Configuration and dependencies
+
+Issue #1 will add a tracked `.env.example` documenting `OPENAI_API_KEY`, LLM,
+vision, and embedding model/base URL settings; `RAG_WORKING_DIR`; `DATABASE_URL`;
+`OBJECT_STORAGE_*`; `ALLOWED_CORS_ORIGIN`; and server/logging configuration.
+Secrets are environment-only. Add the minimal runtime dependencies in the
+Python project: FastAPI/ASGI server, Pydantic settings, SQLAlchemy + Postgres
+driver, Alembic, multipart support, and an S3-compatible client as selected by
+the storage adapter. Frontend tooling is isolated under `web/`.
+
+## Issue order and dependencies
+
+1. **#1 FastAPI skeleton/config** — foundational app factory, lifespan, config,
+   health endpoint, shared errors/logging, singleton RAG facade.
+2. **#4 durable document metadata/state** — depends on #1; database model,
+   migration, storage adapter and persistent work-dir wiring. Implement before
+   ingestion despite its issue number because #2 needs durable records.
+3. **#2 document upload/asynchronous parsing** — depends on #1 and consumes #4;
+   endpoints and guarded ingestion lifecycle, including content-list import.
+4. **#5 capability probe/fallback** — depends on #2; plugs into file admission
+   and parse selection, and extends health output.
+5. **#3 query API** — depends on #2; citations and SSE built on indexed docs.
+6. **#6 document management page** — depends on #2 and #5; uses documents and
+   health capability APIs with polling.
+7. **#7 chat page** — depends on #3; streams answers and renders citations.
+8. **#8 key-path tests** — depends on #3 and #5; exercise contracts, state
+   transitions, direct import, citations and degraded paths with fakes.
+9. **#9 end-to-end verification** — depends on #6–#8; validates a self-hosted
+   persistent upload → ready → cited query → restart workflow and deployment
+   documentation.
+
+## Testing strategy
+
+Use dependency overrides/fakes for RAG, object storage, capabilities, and
+background runner so tests are deterministic. API tests cover validation,
+status transitions, durable error recording, direct import, query citation
+mapping/SSE, and all fallbacks. E2E uses a real Postgres/object-store-compatible
+self-hosted profile plus a fixture PDF containing text, an image, and a table;
+it verifies persistence after process restart.
