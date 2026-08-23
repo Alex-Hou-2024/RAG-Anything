@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import Settings, get_settings
 from .deps import RAGFactory, RAGService, create_rag_anything
 from .routers.documents import router as documents_router
+from .routers.health import router as health_router
 from .routers.query import router as query_router
 from .routers.lightrag import discover_webui_directory, router as lightrag_router
 from .services.ingest import IngestService
@@ -118,6 +119,7 @@ def create_app(
     # Keep health at its established public path below.
     app.include_router(documents_router, prefix="/api")
     app.include_router(query_router, prefix="/api")
+    app.include_router(health_router)
     if lightrag_webui_root is None:
         app.include_router(lightrag_router)
     # The vendor UI is visualization-only; this outer middleware also covers
@@ -181,21 +183,6 @@ def create_app(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=error_payload("internal_error", "An unexpected server error occurred"),
         )
-
-    @app.get("/healthz", tags=["health"])
-    async def healthz(request: Request) -> dict[str, Any]:
-        """Provide liveness and RAG startup state without exposing configuration secrets."""
-        service: RAGService = request.app.state.rag_service
-        return {
-            "status": "ok" if service.is_ready else "degraded",
-            "service": "RAG-Anything",
-            "capabilities": request.app.state.capabilities.public(),
-            "lightrag_webui": lightrag_webui_root is not None,
-            "rag": {
-                "initialized": service.is_ready,
-                "error": service.initialization_error,
-            },
-        }
 
     @app.api_route("/api", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     @app.api_route("/api/{api_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
