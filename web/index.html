@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="RAG-Anything 文档管理" />
+    <title>RAG-Anything 文档管理</title>
+  </head>
+  <body>
+    <main id="app" aria-live="polite">正在加载文档管理…</main>
+    <script type="module">
+      import { mountDocuments } from "/pages/documents/index.js";
+
+      mountDocuments(document.getElementById("app"));
+    </script>
+  </body>
+</html>
