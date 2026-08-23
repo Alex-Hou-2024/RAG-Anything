@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, DateTime, JSON, String, Text, Uuid, func, select
+from sqlalchemy import BigInteger, DateTime, JSON, String, Text, Uuid, func, select, update
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
 from .db import Base
@@ -182,6 +182,43 @@ class DocumentRepository:
                 return None
             row.status = status.value
             row.error_message = error_message
+            row.updated_at = datetime.now(timezone.utc)
+            session.flush()
+            return _record(row)
+
+    async def mark_interrupted_as_failed(self, reason: str) -> int:
+        """Make work abandoned by a process restart visible and retryable."""
+        return await asyncio.to_thread(self._mark_interrupted_as_failed, reason)
+
+    def _mark_interrupted_as_failed(self, reason: str) -> int:
+        interrupted = (
+            DocumentStatus.PENDING.value,
+            DocumentStatus.PARSING.value,
+            DocumentStatus.INDEXING.value,
+        )
+        with self._session_factory.begin() as session:
+            result = session.execute(
+                update(DocumentRow)
+                .where(DocumentRow.status.in_(interrupted))
+                .values(
+                    status=DocumentStatus.FAILED.value,
+                    error_message=reason,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            return int(result.rowcount or 0)
+
+    async def reset_failed_for_retry(self, document_id: UUID) -> DocumentRecord | None:
+        """Atomically return a failed job to pending state for a new attempt."""
+        return await asyncio.to_thread(self._reset_failed_for_retry, document_id)
+
+    def _reset_failed_for_retry(self, document_id: UUID) -> DocumentRecord | None:
+        with self._session_factory.begin() as session:
+            row = session.get(DocumentRow, document_id)
+            if row is None or row.status != DocumentStatus.FAILED.value:
+                return None
+            row.status = DocumentStatus.PENDING.value
+            row.error_message = None
             row.updated_at = datetime.now(timezone.utc)
             session.flush()
             return _record(row)

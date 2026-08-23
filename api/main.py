@@ -107,15 +107,22 @@ def create_app(
         app.state.settings = app_settings
         app.state.database = database
         app.state.rag_service = service
-        app.state.ingest_service = IngestService(
+        ingest_service = IngestService(
             app_settings,
             service,
             DocumentRepository(database.session_factory),
         )
+        app.state.ingest_service = ingest_service
         app.state.query_service = QueryService(service)
         app.state.capabilities = detect_capabilities()
         app.state.lightrag_webui_available = lightrag_webui_root is not None
         try:
+            recovered_count = await ingest_service.recover_interrupted_documents()
+            if recovered_count:
+                logger.warning(
+                    "Marked %s interrupted document ingestion job(s) as failed after restart",
+                    recovered_count,
+                )
             await service.initialize()
             yield
         finally:
