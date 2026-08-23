@@ -1,67 +1,26 @@
-# RAG-Anything Web/API delivery plan (issues #28–#32)
+# 运行可靠性改造计划（Issues #45–#54）
 
-## Target architecture and layout
+## 模块与共享结构
+- `pyproject.toml`、`setup.py`、`requirements.txt`：以 Python >= 3.10 为唯一运行基线；基础服务依赖与可选解析器 extras 分层。
+- `api/config.py`：唯一环境配置入口，定义 `Settings`、模型配置组校验、持久目录/对象存储校验和安全的公开诊断信息。
+- `api/services/capabilities.py`、`api/services/rag.py`、`api/routers/health.py`：集中能力探测、实际解析器选择、RAG 初始化和带缓存的 chat/vision/embedding 探活；`/healthz` 只返回状态、原因和影响，不返回密钥。
+- `raganything/parser.py`：MinerU 优先，纯 Python PDF/图片降级解析器，以及 Office 不可用时的显式拒绝；保持 `content_list` 导入契约。
+- `api/services/ingest.py`：上传、持久对象存储、任务执行、重试、重启恢复和删除协调；调用 `raganything/processor.py` 的文档级索引清理接口。
+- `api/db.py`、`api/models.py`、`migrations/`：数据库引擎、幂等迁移、异步仓储接口及文档状态机；Postgres 持久化取代进程内字典。
+- `web/src/pages/documents.js`、`web/src/pages/chat.js`、API 客户端：消费 health 的公开诊断，展示能力/影响，缺密钥时禁用写入和提问，提供重试操作。
+- `tests/api/`、`tests/e2e/`：配置/仓储/状态转换/索引清理单测，以及无 MinerU/LibreOffice 的真实端到端验收。
 
-A production Vite frontend lives in `web/` and is built once into `web/dist`.
-FastAPI remains the only runtime process: `api/main.py` exposes `/healthz`,
-mounts all application routers beneath `/api`, serves immutable frontend assets
-from `web/dist`, and falls back to `web/dist/index.html` for browser routes.
+## 依赖顺序
+1. #45 收敛依赖，确保轻量基础运行环境可安装。
+2. #46 基于能力探测加入可用降级解析；#47 依赖其公开能力信息。
+3. #48 增加模型配置与密钥诊断；#49 依赖 #48，固化可写持久目录与对象存储配置。
+4. #50 依赖 #49，将文档状态迁移到 Postgres；#51、#52 都依赖 #50 的持久文档记录。
+5. #53 依赖 #48，在 RAG 服务层提供探活结果。
+6. #54 汇总 #47、#51、#52、#53，验证无 MinerU 的持久化完整链路。
 
-```
-web/
-  package.json, vite.config.* , index.html  # Vite build; output is dist/
-  src/
-    main.*                                  # application bootstrap/router
-    api/client.*                            # base URL, fetch/SSE, shared error type
-    api/types.*                             # document, health, query DTOs
-    pages/documents/*, pages/chat/*         # loading/error-aware feature views
-api/
-  config.py                                 # validated environment Settings
-  main.py                                   # app factory, /api routes, static SPA
-  routers/documents.py, routers/query.py   # existing domain endpoints, prefixed by app
-  services/*                                # ingestion/query implementation
-scripts/
-  start.sh                                  # validated self-hosted build/start helper
-docs/ or README.md                          # deployment and E2E procedure
-```
-
-## Shared contracts and decisions
-
-- `VITE_API_BASE_URL` is the sole browser API base. It defaults to `/api`, so
-  both local production and cross-origin deployments work without a dev proxy
-  or a hard-coded localhost URL.
-- The API client owns JSON/error decoding, request cancellation where needed,
-  multipart upload, health checks, and SSE query parsing. Pages consume typed
-  `Document`, `DocumentList`, `Health`, `QueryRequest`, and query event
-  contracts and render consistent loading/error states.
-- Keep `GET /healthz` at its current public path. Document and query routes
-  move from `/documents` and `/query` to `/api/documents` and `/api/query`.
-- SPA fallback must be registered after explicit API and health routes; static
-  JS/CSS must never be Origin-gated. CORS accepts the platform-provided
-  `ALLOWED_CORS_ORIGIN` (and proxy-aware public host handling if an origin
-  comparison is required), never the rewritten raw `Host`.
-- `Settings` is the single source of environment configuration. Startup
-  validates required secrets/settings with actionable messages and creates
-  `RAG_WORKING_DIR` and `RAG_OUTPUT_DIR` before RAG initialization.
-
-## Issue order and dependencies
-
-1. **#28** creates the Vite entrypoint, source root, deterministic `web/dist`
-   output, and documents `VITE_API_BASE_URL` in `.env.example`.
-2. **#29** depends on #28: replace direct page `fetch` calls with the shared
-   client and point upload, status/list/delete, query/retrieval, and health
-   calls at the configured API base.
-3. **#30** depends on #28: prefix routers with `/api`, serve `web/dist`, and
-   add safe SPA fallback while preserving `/healthz`.
-4. **#31** is compatible with #28/#30 and must complete before deployment:
-   finalize `.env.example`, validation, and durable-directory creation.
-5. **#32** depends on #30 and #31: document and script `npm run build`,
-   `pip install -e .`, then `uvicorn api.main:app --host 0.0.0.0 --port 8080`;
-   verify health, SPA loading, and upload → parse → retrieval end to end.
-
-## Verification boundaries
-
-Unit/API tests cover API prefixes, configuration failures/directory creation,
-static asset and SPA fallback precedence, and client error/SSE behavior. The
-self-hosted E2E check uses the built frontend and an actual sample document,
-waits for its terminal parse state, then confirms a retrieval answer.
+## 关键设计决策
+- 启动失败分为致命配置错误（目录不可写、部分 S3 配置、模型配置组不一致）和可降级能力缺失（MinerU/LibreOffice/模型探活失败）；后者服务仍可启动且 health/UI 明示限制。
+- 所有解析器选择和能力说明由后端给出，前端不推断环境；降级 PDF/图片流程明确标注版面/表格能力下降。
+- 文档状态以数据库为权威，状态转换与重试幂等；启动恢复将悬挂任务标记失败而非静默继续。
+- 删除采用“索引清理成功后再完成元数据/源文件删除”或记录可读失败状态，避免已删文档仍被召回。
+- 密钥永不进入响应、前端构建产物、日志或示例；探活结果缓存并仅公开状态与脱敏原因。

@@ -1,85 +1,3 @@
-# Python-related files
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-*.tgz
-*.tar.gz
-*.ini
-
-# Virtual Environment
-.venv/
-env/
-venv/
-
-*.env*
-.env_example
-
-# Build / Distribution
-dist/
-build/
-site/
-
-# Logs / Reports
-*.log
-*.log.*
-*.logfire
-*.coverage/
-log/
-
-# Caches
-.cache/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.gradio/
-.history/
-temp/
-
-# IDE / Editor Files
-.idea/
-.vscode/
-.vscode/settings.json
-
-# Framework-specific files
-local_neo4jWorkDir/
-neo4jWorkDir/
-
-# Data & Storage
-inputs/
-rag_storage*/
-examples/input/
-examples/output/
-output*/
-
-# Miscellaneous
-.DS_Store
-TODO.md
-ignore_this.txt
-*.ignore.*
-
-# Project-specific files
-dickens*/
-book.txt
-LightRAG.pdf
-LightRAG_2-4.pdf
-download_models_hf.py
-lightrag-dev/
-gui/
-tiktoken_cache/
-
-# unit-test files
-test_*
-
-# Cline files
-memory-bank/
-
-# AI
-.claude/
-.cursor/
-CLAUDE.md
-
-# Autonomous workspace and local service state
 target/
 node_modules/
 .gh_token
@@ -92,6 +10,11 @@ node_modules/
 .pipeline-state.json
 .gitkeep
 .progress
-
-# Keep the committed configuration template available for deployment.
-!.env.example
+.env.production
+.deploy_url
+verify-screenshot.png
+verify-ui.js
+__pycache__/
+*.py[cod]
+.venv/
+web/dist/
