@@ -21,6 +21,7 @@ from .config import Settings, get_settings
 from .deps import RAGFactory, RAGService, create_rag_anything
 from .routers.documents import router as documents_router
 from .routers.query import router as query_router
+from .routers.lightrag import discover_webui_directory, router as lightrag_router
 from .services.ingest import IngestService
 from .services.query import QueryService
 from .services.capabilities import detect_capabilities
@@ -93,6 +94,7 @@ def create_app(
     # API remain usable during local development before the first web build.
     web_root = built_web_root if built_web_root.is_dir() else source_web_root
     web_index = web_root / "index.html"
+    lightrag_webui_root = discover_webui_directory()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -102,6 +104,7 @@ def create_app(
         app.state.ingest_service = IngestService(app_settings, service)
         app.state.query_service = QueryService(service)
         app.state.capabilities = detect_capabilities()
+        app.state.lightrag_webui_available = lightrag_webui_root is not None
         await service.initialize()
         yield
         await service.shutdown()
@@ -115,6 +118,8 @@ def create_app(
     # Keep health at its established public path below.
     app.include_router(documents_router, prefix="/api")
     app.include_router(query_router, prefix="/api")
+    if lightrag_webui_root is None:
+        app.include_router(lightrag_router)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(app_settings.allowed_cors_origins),
@@ -186,6 +191,7 @@ def create_app(
             "status": "ok" if service.is_ready else "degraded",
             "service": "RAG-Anything",
             "capabilities": request.app.state.capabilities.public(),
+            "lightrag_webui": lightrag_webui_root is not None,
             "rag": {
                 "initialized": service.is_ready,
                 "error": service.initialization_error,
@@ -197,6 +203,11 @@ def create_app(
     async def unknown_api_route(api_path: str = "") -> None:
         """Return JSON 404s for unknown API routes instead of the SPA document."""
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API route not found")
+
+    # Mount the optional vendor UI before the SPA. Its relative assets resolve
+    # beneath /lightrag and cannot shadow the API or application routes.
+    if lightrag_webui_root is not None:
+        app.mount("/lightrag", StaticFiles(directory=lightrag_webui_root, html=True), name="lightrag")
 
     # Register the static application last: explicit health and /api routes
     # therefore cannot be shadowed by the client-side history fallback.
