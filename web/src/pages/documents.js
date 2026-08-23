@@ -16,7 +16,7 @@ const STATUS_LABELS = {
   failed: "处理失败",
 };
 
-export function createDocumentsPage({ ragAvailable = false } = {}) {
+export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {}) {
   const page = document.createElement("section");
   page.className = "page page--documents";
   page.innerHTML = `
@@ -59,7 +59,12 @@ export function createDocumentsPage({ ragAvailable = false } = {}) {
     dropZone.setAttribute("aria-disabled", "true");
     dropZone.tabIndex = -1;
     fileInput.disabled = true;
-    showUploadMessage("文档上传已暂停：管理员尚未配置 RAG 模型凭据。", "info");
+    showUploadMessage(
+      ragStatus.code === "missing_model_key"
+        ? "未配置模型密钥，请在项目环境变量中设置 `OPENAI_API_KEY`。"
+        : "文档上传已暂停：RAG 服务尚未就绪。",
+      "info",
+    );
   }
 
   async function refreshCapabilities() {

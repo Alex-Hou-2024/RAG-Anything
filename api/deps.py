@@ -14,6 +14,8 @@ from .services.rag import create_rag_anything
 
 logger = logging.getLogger(__name__)
 
+MODEL_KEY_MISSING_ERROR = "未配置模型密钥，请在项目环境变量中设置 OPENAI_API_KEY。"
+
 
 class RAGFactory(Protocol):
     """A factory signature that enables deterministic test doubles."""
@@ -29,6 +31,7 @@ class RAGService:
     factory: RAGFactory
     instance: Any | None = None
     initialization_error: str | None = None
+    initialization_code: str | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -37,8 +40,15 @@ class RAGService:
     async def initialize(self) -> None:
         """Construct the singleton while preserving health diagnostics on failure."""
         if not self.settings.openai_api_key:
-            self.initialization_error = "RAG backend is unavailable because OPENAI_API_KEY is not configured"
-            logger.warning("RAG backend disabled: OPENAI_API_KEY is not configured")
+            self.initialization_code = "missing_model_key"
+            self.initialization_error = MODEL_KEY_MISSING_ERROR
+            logger.warning("RAG backend disabled: model key is not configured")
+            return
+        configuration_error = getattr(self.settings, "model_configuration_error", None)
+        if configuration_error:
+            self.initialization_code = "invalid_model_configuration"
+            self.initialization_error = f"模型配置无效：{configuration_error}"
+            logger.warning("RAG backend disabled: invalid model configuration: %s", configuration_error)
             return
         try:
             self.instance = self.factory(self.settings)
@@ -49,8 +59,10 @@ class RAGService:
                     result = await result
                 if isinstance(result, dict) and not result.get("success", True):
                     self.initialization_error = str(result.get("error", "RAG initialization failed"))
+                    self.initialization_code = "rag_initialization_failed"
             logger.info("RAGAnything singleton initialization attempted")
         except Exception as error:
+            self.initialization_code = "rag_initialization_failed"
             self.initialization_error = "RAG backend initialization failed"
             logger.exception("Unable to initialize the RAGAnything singleton: %s", error)
 

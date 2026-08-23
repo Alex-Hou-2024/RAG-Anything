@@ -68,10 +68,15 @@ def build_health_payload(
         "rag": {
             "initialized": rag_ready,
             "error": rag_error,
+            "code": service.initialization_code,
             "action": (
                 "RAG 服务已就绪，可以上传文档并开始问答。"
                 if rag_ready
-                else "RAG 服务未就绪；请检查模型密钥和模型配置后重启服务。"
+                else (
+                    "请在项目环境变量中设置 OPENAI_API_KEY 后重启服务。"
+                    if service.initialization_code == "missing_model_key"
+                    else "请检查模型密钥和模型配置后重启服务。"
+                )
             ),
         },
     }
