@@ -25,6 +25,7 @@ from .routers.lightrag import discover_webui_directory, router as lightrag_route
 from .services.ingest import IngestService
 from .services.query import QueryService
 from .services.capabilities import detect_capabilities
+from .middleware import LightRAGReadOnlyMiddleware
 
 logger = logging.getLogger("api")
 
@@ -120,6 +121,9 @@ def create_app(
     app.include_router(query_router, prefix="/api")
     if lightrag_webui_root is None:
         app.include_router(lightrag_router)
+    # The vendor UI is visualization-only; this outer middleware also covers
+    # future WebUI API paths that its static bundle may issue.
+    app.add_middleware(LightRAGReadOnlyMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(app_settings.allowed_cors_origins),
