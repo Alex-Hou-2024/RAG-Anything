@@ -17,7 +17,9 @@ from fastapi.responses import JSONResponse
 from .config import Settings, get_settings
 from .deps import RAGFactory, RAGService, create_rag_anything
 from .routers.documents import router as documents_router
+from .routers.query import router as query_router
 from .services.ingest import IngestService
+from .services.query import QueryService
 
 logger = logging.getLogger("api")
 
@@ -62,6 +64,7 @@ def create_app(
         app.state.settings = app_settings
         app.state.rag_service = service
         app.state.ingest_service = IngestService(app_settings, service)
+        app.state.query_service = QueryService(service)
         await service.initialize()
         yield
         await service.shutdown()
@@ -72,6 +75,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.include_router(documents_router)
+    app.include_router(query_router)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(app_settings.allowed_cors_origins),
