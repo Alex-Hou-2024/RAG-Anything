@@ -19,6 +19,11 @@ _DEFAULT_CORS_ORIGINS: Final[tuple[str, ...]] = (
     "http://localhost:5173",
     "http://localhost:8080",
 )
+_SECRET_PLACEHOLDERS: Final[frozenset[str]] = frozenset({
+    "replace-with-runtime-secret",
+    "changeme",
+    "your-openai-api-key",
+})
 
 
 def _get_env(name: str, default: str | None = None) -> str | None:
@@ -27,6 +32,30 @@ def _get_env(name: str, default: str | None = None) -> str | None:
         return default
     value = value.strip()
     return value if value else default
+
+
+def _required_secret(name: str) -> str:
+    """Read a required secret and reject the documented placeholder values."""
+    value = _get_env(name)
+    if value is None or value.casefold() in _SECRET_PLACEHOLDERS:
+        raise ConfigurationError(
+            f"{name} is required; set it to a runtime secret before starting the service"
+        )
+    return value
+
+
+def _persistent_directory(name: str, default: str) -> Path:
+    """Return an existing writable directory, creating it when necessary."""
+    directory = Path(_get_env(name, default) or default).expanduser()
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ConfigurationError(
+            f"{name} directory '{directory}' could not be created: {error}"
+        ) from error
+    if not directory.is_dir():
+        raise ConfigurationError(f"{name} must point to a directory: '{directory}'")
+    return directory
 
 
 def _get_int(name: str, default: int) -> int:
@@ -75,10 +104,10 @@ def _required_object_storage_fields(settings: "Settings") -> None:
 class Settings:
     """All service configuration read from environment variables.
 
-    Model credentials deliberately remain optional at configuration time.  The
-    application can still expose health diagnostics in an environment where the
-    RAG backend cannot start; query/ingestion features added later can require a
-    configured backend before accepting work.
+    OPENAI_API_KEY is required because the RAG backend cannot serve ingestion
+    or retrieval without it. Persistent working and parser-output directories
+    are created while reading settings so startup fails with a direct
+    configuration error instead of a later storage failure.
     """
 
     app_host: str
@@ -87,7 +116,7 @@ class Settings:
     app_environment: str
     allowed_cors_origins: tuple[str, ...]
 
-    openai_api_key: str | None
+    openai_api_key: str
     llm_model: str
     llm_base_url: str
     vision_model: str
@@ -120,7 +149,7 @@ class Settings:
             app_log_level=(_get_env("APP_LOG_LEVEL", "INFO") or "INFO").upper(),
             app_environment=_get_env("APP_ENVIRONMENT", "production") or "production",
             allowed_cors_origins=_get_origins(_get_env("ALLOWED_CORS_ORIGIN")),
-            openai_api_key=_get_env("OPENAI_API_KEY"),
+            openai_api_key=_required_secret("OPENAI_API_KEY"),
             llm_model=_get_env("LLM_MODEL", "gpt-4o-mini") or "gpt-4o-mini",
             llm_base_url=_get_env("LLM_BASE_URL", "https://api.openai.com/v1")
             or "https://api.openai.com/v1",
@@ -132,12 +161,8 @@ class Settings:
             embedding_base_url=_get_env("EMBEDDING_BASE_URL", "https://api.openai.com/v1")
             or "https://api.openai.com/v1",
             embedding_dimension=_get_int("EMBEDDING_DIMENSION", 1536),
-            rag_working_dir=Path(
-                _get_env("RAG_WORKING_DIR", "./rag_storage") or "./rag_storage"
-            ).expanduser(),
-            rag_output_dir=Path(
-                _get_env("RAG_OUTPUT_DIR", "./output") or "./output"
-            ).expanduser(),
+            rag_working_dir=_persistent_directory("RAG_WORKING_DIR", "./rag_storage"),
+            rag_output_dir=_persistent_directory("RAG_OUTPUT_DIR", "./output"),
             rag_parser=_get_env("RAG_PARSER", "mineru") or "mineru",
             rag_parse_method=_get_env("RAG_PARSE_METHOD", "auto") or "auto",
             database_url=_get_env("DATABASE_URL"),
