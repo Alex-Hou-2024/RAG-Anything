@@ -4,6 +4,8 @@ export const listDocuments = () => api("documents");
 export const documentStatus = (id) => api(`documents/${encodeURIComponent(id)}/status`);
 export const deleteDocument = (id) =>
   api(`documents/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const retryDocument = (id) =>
+  api(`documents/${encodeURIComponent(id)}/retry`, { method: "POST" });
 export const getCapabilities = () => publicApi("healthz");
 
 export async function uploadDocument(file) {

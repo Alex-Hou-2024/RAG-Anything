@@ -134,6 +134,24 @@ class IngestService:
                 settings.rag_working_dir / "object_storage", settings.object_storage_prefix
             )
 
+    async def recover_interrupted_documents(self) -> int:
+        """Expose jobs abandoned by a previous FastAPI process as retryable failures."""
+        return await self.documents.mark_interrupted_as_failed("服务重启导致中断，请重新解析。")
+
+    async def retry_document(self, document_id: UUID) -> DocumentRecord | None:
+        """Reset a failed job only when its original input can still be processed."""
+        record = await self.documents.get(document_id)
+        if record is None:
+            return None
+        if record.status is not DocumentStatus.FAILED:
+            raise IngestError("只有处理失败的文档可以重新解析。")
+        if record.content_list is None and record.object_key is None:
+            raise IngestError("原始文档不可用，无法重新解析。")
+        retried = await self.documents.reset_failed_for_retry(document_id)
+        if retried is None:
+            raise IngestError("文档状态已变更，请刷新后重试。")
+        return retried
+
     @staticmethod
     def _filename(filename: str | None) -> str:
         name = _SAFE_FILENAME.sub("_", Path(filename or "upload").name).strip("._")

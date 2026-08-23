@@ -75,6 +75,29 @@ async def list_documents(
     return {"items": [record.public_dict() for record in records], "offset": offset, "limit": limit, "total": total}
 
 
+@router.post("/{document_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+async def retry_document(
+    document_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    """Queue a fresh ingestion attempt for a durable failed document record."""
+    if not request.app.state.rag_service.is_ready:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RAG backend is unavailable; configure a valid OPENAI_API_KEY before retrying documents",
+        )
+    service = _service(request)
+    try:
+        record = await service.retry_document(document_id)
+    except IngestError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    if record is None:
+        raise _not_found()
+    background_tasks.add_task(service.process_document, document_id)
+    return {"document_id": str(document_id), "status": record.status.value}
+
+
 @router.get("/{document_id}/status")
 async def document_status(document_id: UUID, request: Request) -> dict[str, Any]:
     record = await _service(request).documents.get(document_id)

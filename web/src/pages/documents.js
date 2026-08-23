@@ -3,6 +3,7 @@ import {
   documentStatus,
   getCapabilities,
   listDocuments,
+  retryDocument,
   uploadDocument,
 } from "../api/documents.js";
 import { createNotice } from "../components/layout.js";
@@ -182,7 +183,26 @@ export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {
           remove.disabled = false;
         }
       });
-      controls.append(status, remove);
+      if (record.status === "failed") {
+        const retry = document.createElement("button");
+        retry.className = "button button--secondary";
+        retry.type = "button";
+        retry.textContent = "重新解析";
+        retry.addEventListener("click", async () => {
+          retry.disabled = true;
+          try {
+            await retryDocument(record.document_id);
+            documentStatusNode.replaceChildren(createNotice("已重新加入解析队列。", "success"));
+            await refreshDocuments();
+          } catch (error) {
+            documentStatusNode.replaceChildren(createNotice(`重新解析失败：${error.message}`));
+            retry.disabled = false;
+          }
+        });
+        controls.append(status, retry, remove);
+      } else {
+        controls.append(status, remove);
+      }
       row.append(details, controls);
       documentList.append(row);
     }
