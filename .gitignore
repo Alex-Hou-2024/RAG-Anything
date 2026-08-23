@@ -18,3 +18,5 @@ __pycache__/
 *.py[cod]
 .venv/
 web/dist/
+build/
+*.egg-info/
