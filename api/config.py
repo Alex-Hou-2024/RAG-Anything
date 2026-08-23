@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -55,17 +56,31 @@ def _optional_secret(name: str) -> str | None:
 
 
 def _persistent_directory(name: str, default: str) -> Path:
-    """Return an existing writable directory, creating it when necessary."""
+    """Return the configured persistent path; validate it during startup."""
     directory = Path(_get_env(name, default) or default).expanduser()
     try:
         directory.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        raise ConfigurationError(
-            f"{name} directory '{directory}' could not be created: {error}"
-        ) from error
-    if not directory.is_dir():
-        raise ConfigurationError(f"{name} must point to a directory: '{directory}'")
+    except OSError:
+        # Keep the app process alive long enough for /healthz to report the
+        # exact directory error through storage_configuration_error.
+        pass
     return directory
+
+
+def _directory_writable_error(name: str, directory: Path) -> str | None:
+    """Create and remove a probe file so unwritable mounts fail before ingestion."""
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        return f"{name} 目录 '{directory}' 无法创建：{error}"
+    if not directory.is_dir():
+        return f"{name} 必须指向目录：'{directory}'"
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".raganything-write-", dir=directory):
+            pass
+    except OSError as error:
+        return f"{name} 目录 '{directory}' 不可写：{error}"
+    return None
 
 
 def _get_int(name: str, default: int) -> int:
@@ -94,8 +109,8 @@ def _get_origins(value: str | None) -> tuple[str, ...]:
     return origins
 
 
-def _required_object_storage_fields(settings: "Settings") -> None:
-    """Reject partial object-storage settings before the storage service is added."""
+def _object_storage_configuration_error(settings: "Settings") -> str | None:
+    """Return a safe error for incomplete S3 settings without exposing secrets."""
     values = (
         settings.object_storage_endpoint,
         settings.object_storage_bucket,
@@ -103,11 +118,12 @@ def _required_object_storage_fields(settings: "Settings") -> None:
         settings.object_storage_secret_access_key,
     )
     if any(values) and not all(values):
-        raise ConfigurationError(
+        return (
             "OBJECT_STORAGE_ENDPOINT, OBJECT_STORAGE_BUCKET, "
             "OBJECT_STORAGE_ACCESS_KEY_ID, and OBJECT_STORAGE_SECRET_ACCESS_KEY "
             "must be configured together"
         )
+    return None
 
 
 def _is_explicitly_configured(name: str) -> bool:
@@ -150,6 +166,7 @@ class Settings:
     # parser, and model values used to construct both services.
     rag_working_dir: Path
     rag_output_dir: Path
+    rag_parser_cache_dir: Path
     rag_parser: str
     rag_parse_method: str
     database_url: str | None
@@ -160,6 +177,30 @@ class Settings:
     object_storage_access_key_id: str | None
     object_storage_secret_access_key: str | None
     object_storage_prefix: str
+
+    @property
+    def object_storage_enabled(self) -> bool:
+        """Use S3 only when its complete, validated configuration is present."""
+        return self.object_storage_configuration_error is None and bool(
+            self.object_storage_endpoint
+        )
+
+    @property
+    def object_storage_configuration_error(self) -> str | None:
+        return _object_storage_configuration_error(self)
+
+    @property
+    def storage_configuration_error(self) -> str | None:
+        """Check durable directories and S3 as a startup diagnostic for health."""
+        for name, directory in (
+            ("RAG_WORKING_DIR", self.rag_working_dir),
+            ("RAG_OUTPUT_DIR", self.rag_output_dir),
+            ("RAG_PARSER_CACHE_DIR", self.rag_parser_cache_dir),
+        ):
+            error = _directory_writable_error(name, directory)
+            if error is not None:
+                return error
+        return self.object_storage_configuration_error
 
     @property
     def model_configuration_error(self) -> str | None:
@@ -225,6 +266,9 @@ class Settings:
             # these locations.
             rag_working_dir=_persistent_directory("RAG_WORKING_DIR", "/data/rag_storage"),
             rag_output_dir=_persistent_directory("RAG_OUTPUT_DIR", "/data/output"),
+            rag_parser_cache_dir=_persistent_directory(
+                "RAG_PARSER_CACHE_DIR", "/data/rag_parser_cache"
+            ),
             rag_parser=_get_env("RAG_PARSER", "auto") or "auto",
             rag_parse_method=_get_env("RAG_PARSE_METHOD", "auto") or "auto",
             database_url=_get_env("DATABASE_URL"),
@@ -246,7 +290,6 @@ class Settings:
             raise ConfigurationError("RAG_PARSER must not be empty")
         if not settings.rag_parse_method:
             raise ConfigurationError("RAG_PARSE_METHOD must not be empty")
-        _required_object_storage_fields(settings)
         return settings
 
 

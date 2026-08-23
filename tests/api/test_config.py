@@ -15,6 +15,7 @@ def _set_required_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     monkeypatch.setenv("APP_PORT", "8080")
     monkeypatch.setenv("RAG_WORKING_DIR", str(tmp_path / "working"))
     monkeypatch.setenv("RAG_OUTPUT_DIR", str(tmp_path / "output"))
+    monkeypatch.setenv("RAG_PARSER_CACHE_DIR", str(tmp_path / "parser-cache"))
 
 
 def test_missing_openai_key_leaves_rag_in_degraded_mode(
@@ -46,11 +47,12 @@ def test_missing_persistent_directories_are_created(
 
     assert settings.rag_working_dir.is_dir()
     assert settings.rag_output_dir.is_dir()
+    assert settings.rag_parser_cache_dir.is_dir()
     assert settings.allowed_cors_origins == ("https://rag.example.test",)
     assert settings.app_port == 8080
 
 
-def test_persistent_directory_must_not_be_a_file(
+def test_persistent_directory_error_is_available_without_preventing_health_startup(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _set_required_environment(monkeypatch, tmp_path)
@@ -58,8 +60,10 @@ def test_persistent_directory_must_not_be_a_file(
     output_file.write_text("not a directory")
     monkeypatch.setenv("RAG_OUTPUT_DIR", str(output_file))
 
-    with pytest.raises(ConfigurationError, match="RAG_OUTPUT_DIR directory"):
-        Settings.from_environment()
+    settings = Settings.from_environment()
+
+    assert settings.storage_configuration_error is not None
+    assert "RAG_OUTPUT_DIR" in settings.storage_configuration_error
 
 
 def test_partial_model_group_is_reported_at_startup(
@@ -85,3 +89,19 @@ def test_known_embedding_dimension_mismatch_is_reported(
     assert error is not None
     assert "EMBEDDING_DIMENSION=3072" in error
     assert "需要 1536 维" in error
+
+
+def test_partial_object_storage_configuration_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_required_environment(monkeypatch, tmp_path)
+    monkeypatch.setenv("OBJECT_STORAGE_ENDPOINT", "https://s3.example.test")
+    monkeypatch.setenv("OBJECT_STORAGE_BUCKET", "documents")
+    monkeypatch.delenv("OBJECT_STORAGE_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("OBJECT_STORAGE_SECRET_ACCESS_KEY", raising=False)
+
+    settings = Settings.from_environment()
+
+    assert settings.object_storage_enabled is False
+    assert settings.storage_configuration_error is not None
+    assert "OBJECT_STORAGE_ENDPOINT" in settings.storage_configuration_error

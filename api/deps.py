@@ -50,6 +50,12 @@ class RAGService:
             self.initialization_error = f"模型配置无效：{configuration_error}"
             logger.warning("RAG backend disabled: invalid model configuration: %s", configuration_error)
             return
+        storage_error = getattr(self.settings, "storage_configuration_error", None)
+        if storage_error:
+            self.initialization_code = "invalid_storage_configuration"
+            self.initialization_error = f"持久化存储不可用：{storage_error}"
+            logger.error("RAG backend disabled: persistent storage is unavailable: %s", storage_error)
+            return
         try:
             self.instance = self.factory(self.settings)
             initializer = getattr(self.instance, "_ensure_lightrag_initialized", None)

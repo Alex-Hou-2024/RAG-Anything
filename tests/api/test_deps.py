@@ -40,3 +40,24 @@ def test_invalid_model_configuration_disables_rag_without_calling_factory() -> N
     assert not factory_called
     assert service.initialization_code == "invalid_model_configuration"
     assert service.initialization_error == "模型配置无效：配置必须成套设置"
+
+
+def test_invalid_storage_configuration_disables_rag_without_calling_factory() -> None:
+    factory_called = False
+
+    def factory(_) -> object:
+        nonlocal factory_called
+        factory_called = True
+        return object()
+
+    settings = SimpleNamespace(
+        openai_api_key="test-key",
+        model_configuration_error=None,
+        storage_configuration_error="RAG_OUTPUT_DIR 目录不可写",
+    )
+    service = RAGService(settings=settings, factory=factory)
+    asyncio.run(service.initialize())
+
+    assert not factory_called
+    assert service.initialization_code == "invalid_storage_configuration"
+    assert "RAG_OUTPUT_DIR" in service.initialization_error

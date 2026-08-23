@@ -75,7 +75,11 @@ def build_health_payload(
                 else (
                     "请在项目环境变量中设置 OPENAI_API_KEY 后重启服务。"
                     if service.initialization_code == "missing_model_key"
-                    else "请检查模型密钥和模型配置后重启服务。"
+                    else (
+                        "请修正持久化目录权限或完整配置 S3 参数后重启服务。"
+                        if service.initialization_code == "invalid_storage_configuration"
+                        else "请检查模型密钥和模型配置后重启服务。"
+                    )
                 )
             ),
         },
