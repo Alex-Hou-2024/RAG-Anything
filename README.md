@@ -1308,3 +1308,6 @@ If you find RAG-Anything useful in your research, please cite our paper:
     <div style="margin-top: 10px; color: #00d9ff; font-size: 16px;">Building the Future of Multimodal AI</div>
   </div>
 </div>
+
+## Self-hosted API verification
+Copy `.env.example` to `.env`, set runtime secrets and persistent `RAG_WORKING_DIR`, `DATABASE_URL`, and `OBJECT_STORAGE_*`, then run `uvicorn api.main:app --host 0.0.0.0 --port 8080`. Verify upload, status, query, and restart persistence as described in `tests/e2e/README.md`.
