@@ -67,28 +67,40 @@ export function createDocumentsPage({ ragAvailable = false } = {}) {
     try {
       const health = await getCapabilities();
       if (disposed) return;
-      const parser = health.capabilities?.parser;
-      const degraded = Boolean(health.capabilities?.parser_degraded);
-      const limitations = health.capabilities?.parser_limitations || [];
+      const details = health.capability_details || {};
+      const rag = health.rag || {};
+      const parser = details.parser || {};
       const values = [
-        ["MinerU", health.capabilities?.mineru, "用于 PDF 与图片解析"],
-        ["LibreOffice", health.capabilities?.libreoffice, "用于 Office 文档转换"],
         [
-          "文档解析",
-          !degraded,
-          degraded
-            ? `当前使用基础解析（${parser || "python"}）：${limitations.join(" ")}`
-            : `当前使用 ${parser || "MinerU"}，支持 OCR、版面与表格结构解析`,
+          "RAG 服务",
+          Boolean(rag.initialized),
+          rag.initialized
+            ? rag.action || "RAG 服务已就绪，可以上传文档并开始问答。"
+            : `未就绪：${rag.error || "尚未完成初始化"}。${rag.action || "请检查模型密钥和模型配置后重启服务。"}`,
+        ],
+        ["MinerU", details.mineru?.available, `${details.mineru?.reason || "状态未知"} ${details.mineru?.impact || ""}`],
+        ["LibreOffice", details.libreoffice?.available, `${details.libreoffice?.reason || "状态未知"} ${details.libreoffice?.impact || ""}`],
+        [
+          "当前解析器",
+          !parser.degraded,
+          `当前实际生效：${parser.effective || health.capabilities?.parser || "未知"}。${parser.reason || ""} ${parser.impact || ""}`,
         ],
       ];
-      if (!health.capabilities?.libreoffice) {
+      if (details.libreoffice?.available === false) {
         uploadHelp.textContent = "支持 PDF 与图片；当前环境不支持 Office 文件，请转为 PDF 后上传。单个文件最大 100 MB。";
       }
       capabilities.replaceChildren(...values.map(([name, available, note]) => {
         const item = document.createElement("div");
         item.className = "capability";
         const state = available ? "可用" : "不可用";
-        item.innerHTML = `<strong>${name}</strong><span class="badge badge--${available ? "ready" : "muted"}">${state}</span><small>${note}</small>`;
+        const title = document.createElement("strong");
+        title.textContent = name;
+        const badge = document.createElement("span");
+        badge.className = `badge badge--${available ? "ready" : "muted"}`;
+        badge.textContent = state;
+        const description = document.createElement("small");
+        description.textContent = note.trim();
+        item.append(title, badge, description);
         return item;
       }));
     } catch (error) {
