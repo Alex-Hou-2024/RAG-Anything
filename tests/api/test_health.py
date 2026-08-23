@@ -47,3 +47,19 @@ def test_health_payload_reports_ready_rag() -> None:
     assert payload["status"] == "ok"
     assert payload["rag"]["initialized"] is True
     assert payload["capability_details"]["mineru"]["available"] is True
+
+
+def test_health_payload_explains_unavailable_persistent_storage() -> None:
+    service = SimpleNamespace(
+        is_ready=False,
+        initialization_error="持久化存储不可用：RAG_OUTPUT_DIR 目录不可写",
+        initialization_code="invalid_storage_configuration",
+    )
+    capabilities = Capabilities(False, False, "python", True, ("基础解析",))
+
+    payload = build_health_payload(
+        service=service, capabilities=capabilities, lightrag_webui_available=False
+    )
+
+    assert "RAG_OUTPUT_DIR" in payload["rag"]["error"]
+    assert "持久化目录权限" in payload["rag"]["action"]

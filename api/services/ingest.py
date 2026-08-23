@@ -122,7 +122,7 @@ class IngestService:
         # Capture the same runtime capability decision made during application
         # startup. The content-list route remains independent of these tools.
         self.capabilities: Capabilities = detect_capabilities()
-        if settings.object_storage_endpoint:
+        if settings.object_storage_enabled:
             self.storage: ObjectStorage = S3ObjectStorage(settings)
         else:
             self.storage = LocalObjectStorage(

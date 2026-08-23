@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 from api.config import Settings
+
+
+def prepare_parser_cache(settings: Settings) -> None:
+    """Point parser/model caches at the durable volume before optional imports.
+
+    MinerU can obtain models through Hugging Face or ModelScope. Both locations
+    are placed below the configured persistent cache so restarts do not trigger
+    model re-downloads or discard parser state.
+    """
+    cache_root = settings.rag_parser_cache_dir.resolve()
+    huggingface_cache = cache_root / "huggingface"
+    modelscope_cache = cache_root / "modelscope"
+    huggingface_cache.mkdir(parents=True, exist_ok=True)
+    modelscope_cache.mkdir(parents=True, exist_ok=True)
+    os.environ["HF_HOME"] = str(huggingface_cache)
+    os.environ["MODELSCOPE_CACHE"] = str(modelscope_cache)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +98,7 @@ class RAGRuntimeConfig:
 
 def create_rag_anything(settings: Settings) -> Any:
     """Create RAG-Anything with the same storage and model runtime as LightRAG."""
+    prepare_parser_cache(settings)
     # Imports stay local so /healthz remains importable without optional RAG
     # packages installed.
     from lightrag.llm.openai import openai_complete_if_cache, openai_embed
