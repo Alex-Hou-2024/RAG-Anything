@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, get_settings
@@ -60,6 +60,12 @@ def create_app(
     app_settings = settings or get_settings()
     configure_logging(app_settings.app_log_level)
     factory = rag_factory or create_rag_anything
+    source_web_root = Path(__file__).resolve().parent.parent / "web"
+    built_web_root = source_web_root / "dist"
+    # A release serves the Vite build.  Keeping the source fallback lets the
+    # API remain usable during local development before the first web build.
+    web_root = built_web_root if built_web_root.is_dir() else source_web_root
+    web_index = web_root / "index.html"
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -94,7 +100,15 @@ def create_app(
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         started_at = time.perf_counter()
         try:
-            response = await call_next(request)
+            accepts_html = "text/html" in request.headers.get("accept", "")
+            if (
+                request.method == "GET"
+                and request.url.path in {"/", "/documents", "/chat"}
+                and accepts_html
+            ):
+                response = FileResponse(web_index)
+            else:
+                response = await call_next(request)
         except Exception:
             # The exception handler logs stack details before sending the generic
             # error response; this preserves a request-level trace as well.
@@ -157,10 +171,8 @@ def create_app(
             },
         }
 
-    # The root is the document-management entry point.  Mounting this last
-    # leaves all explicit API routes above in control and deliberately provides
-    # no authentication, session, or marketing-page routes.
-    web_root = Path(__file__).resolve().parent.parent / "web"
+    # Explicit API routes remain ahead of this static mount.  HTML navigation
+    # above receives the SPA entry while API fetches request JSON explicitly.
     app.mount("/", StaticFiles(directory=web_root, html=True), name="web")
 
     return app
