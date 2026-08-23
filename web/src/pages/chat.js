@@ -46,6 +46,7 @@ export function createChatPage() {
     let citations = [];
     submit.disabled = true;
     input.disabled = true;
+    form.setAttribute("aria-busy", "true");
     try {
       await streamQuery(
         { query, mode: selector.value },
@@ -68,6 +69,7 @@ export function createChatPage() {
     } finally {
       submit.disabled = false;
       input.disabled = false;
+      form.removeAttribute("aria-busy");
       input.value = "";
       input.focus();
     }

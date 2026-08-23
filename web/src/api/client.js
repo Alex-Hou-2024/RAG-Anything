@@ -1,12 +1,13 @@
-import { apiUrl } from "./base-url.js";
+import { apiUrl, publicUrl } from "./base-url.js";
 
-/** Same-origin API utilities shared by each application page. */
+/** A normalized error returned to pages for HTTP and network failures. */
 export class ApiError extends Error {
-  constructor(message, status, details = undefined) {
+  constructor(message, status = 0, details = undefined, code = undefined) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.details = details;
+    this.code = code;
   }
 }
 
@@ -15,22 +16,57 @@ async function errorFrom(response) {
   try {
     const payload = await response.json();
     const error = payload?.error;
-    return new ApiError(error?.message || fallback, response.status, error?.details);
+    return new ApiError(
+      error?.message || payload?.detail || fallback,
+      response.status,
+      error?.details,
+      error?.code,
+    );
   } catch {
     return new ApiError(fallback, response.status);
   }
 }
 
-export async function api(path, options = {}) {
-  const headers = new Headers(options.headers);
-  headers.set("Accept", "application/json");
-  const response = await fetch(apiUrl(path), { ...options, headers });
-  if (!response.ok) throw await errorFrom(response);
-  return response.status === 204 ? null : response.json();
+async function fetchResponse(url, options = {}) {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    throw new ApiError("无法连接到服务，请检查网络后重试。", 0, undefined, "network_error");
+  }
 }
 
-export async function streamQuery(payload, handlers) {
-  const response = await fetch(apiUrl("query"), {
+async function requestJson(url, options = {}) {
+  const headers = new Headers(options.headers);
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
+  const response = await fetchResponse(url, { ...options, headers });
+  if (!response.ok) throw await errorFrom(response);
+  if (response.status === 204) return null;
+
+  try {
+    return await response.json();
+  } catch {
+    throw new ApiError("服务返回了无效的 JSON 响应。", response.status, undefined, "invalid_response");
+  }
+}
+
+/** Call an application endpoint below the VITE_API_BASE_URL API namespace. */
+export function api(path, options = {}) {
+  return requestJson(apiUrl(path), options);
+}
+
+/** Call a same-origin public endpoint, such as FastAPI's /healthz route. */
+export function publicApi(path, options = {}) {
+  return requestJson(publicUrl(path), options);
+}
+
+/**
+ * Submit a text retrieval query and decode the API's SSE response incrementally.
+ * All query routes flow through apiUrl, so a production build does not need a
+ * Vite development proxy.
+ */
+export async function streamQuery(payload, handlers = {}) {
+  const response = await fetchResponse(apiUrl("query"), {
     method: "POST",
     headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, stream: true }),
@@ -47,18 +83,19 @@ export async function streamQuery(payload, handlers) {
       pending += decoder.decode(value || new Uint8Array(), { stream: !done });
       const events = pending.split(/\r?\n\r?\n/);
       pending = events.pop() || "";
-      for (const eventBlock of events) {
-        const event = parseSseEvent(eventBlock);
-        if (event) handlers[event.name]?.(event.data);
-      }
+      dispatchEvents(events, handlers);
       if (done) break;
     }
-    if (pending.trim()) {
-      const event = parseSseEvent(pending);
-      if (event) handlers[event.name]?.(event.data);
-    }
+    if (pending.trim()) dispatchEvents([pending], handlers);
   } finally {
     reader.releaseLock();
+  }
+}
+
+function dispatchEvents(eventBlocks, handlers) {
+  for (const eventBlock of eventBlocks) {
+    const event = parseSseEvent(eventBlock);
+    if (event) handlers[event.name]?.(event.data);
   }
 }
 
