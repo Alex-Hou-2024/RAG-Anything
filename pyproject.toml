@@ -21,6 +21,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
     "huggingface_hub",
     "lightrag-hku<1.5",
     "mineru[core]>=3.4.1",
@@ -69,7 +71,7 @@ dev-dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["raganything*"]
+include = ["raganything*", "api*"]
 
 [tool.setuptools]
 include-package-data = true
