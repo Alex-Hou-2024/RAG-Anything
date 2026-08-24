@@ -1,10 +1,12 @@
 import { createLayout } from "./components/layout.js";
 import { createChatPage } from "./pages/chat.js";
+import { createConfigurationPage } from "./pages/configuration.js";
 import { createDocumentsPage } from "./pages/documents.js";
 
 const routes = {
   "/documents": createDocumentsPage,
   "/chat": createChatPage,
+  "/configuration": createConfigurationPage,
 };
 
 export function startRouter(root, { lightragAvailable = false, ragAvailable = false, ragStatus = {} } = {}) {
