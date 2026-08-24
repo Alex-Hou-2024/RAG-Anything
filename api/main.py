@@ -20,6 +20,7 @@ from .config import Settings, get_settings
 from .db import Database
 from .deps import RAGFactory, RAGService, create_rag_anything
 from .models import DocumentRepository
+from .routers.config import router as config_router
 from .routers.documents import router as documents_router
 from .routers.health import router as health_router
 from .routers.query import router as query_router
@@ -136,6 +137,7 @@ def create_app(
     )
     # The browser uses the same-origin /api base configured by the Vite build.
     # Keep health at its established public path below.
+    app.include_router(config_router, prefix="/api")
     app.include_router(documents_router, prefix="/api")
     app.include_router(query_router, prefix="/api")
     app.include_router(health_router)
