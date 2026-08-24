@@ -57,15 +57,16 @@ export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {
   };
 
   if (!ragAvailable) {
+    const unavailableReason = ragStatus.code === "missing_model_key"
+      ? "未配置 OPENAI_API_KEY，上传已禁用。请在配置指南中复制变量名并完成配置后重新检测。"
+      : `RAG 服务尚未就绪${ragStatus.error ? `：${ragStatus.error}` : ""}，上传已禁用。`;
+    dropZone.classList.add("is-disabled");
     dropZone.setAttribute("aria-disabled", "true");
     dropZone.tabIndex = -1;
     fileInput.disabled = true;
-    showUploadMessage(
-      ragStatus.code === "missing_model_key"
-        ? "未配置模型密钥，请在项目环境变量中设置 `OPENAI_API_KEY`。"
-        : "文档上传已暂停：RAG 服务尚未就绪。",
-      "info",
-    );
+    dropZone.querySelector("strong").textContent = "当前无法上传文档";
+    uploadHelp.textContent = unavailableReason;
+    showUploadMessage(unavailableReason, "info");
   }
 
   async function refreshCapabilities() {
@@ -241,10 +242,11 @@ export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {
     }
   });
   fileInput.addEventListener("change", () => submitFiles(fileInput.files));
-  dropZone.addEventListener("dragover", (event) => { event.preventDefault(); dropZone.classList.add("is-dragging"); });
+  dropZone.addEventListener("dragover", (event) => { event.preventDefault(); if (!ragAvailable) return; dropZone.classList.add("is-dragging"); });
   dropZone.addEventListener("dragleave", () => dropZone.classList.remove("is-dragging"));
   dropZone.addEventListener("drop", (event) => {
     event.preventDefault();
+    if (!ragAvailable) return;
     dropZone.classList.remove("is-dragging");
     submitFiles(event.dataTransfer?.files || []);
   });
