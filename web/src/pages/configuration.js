@@ -145,6 +145,13 @@ export function createConfigurationPage() {
       <div class="section-title"><div><h2 id="template-title">配置模板</h2><p class="muted">模板使用当前安全的生效值和推荐默认值；所有密钥位置均为占位符。</p></div><button class="button button--primary configuration-template-copy" type="button" disabled>复制完整配置模板</button></div>
       <pre class="configuration-template" aria-label="配置模板预览"></pre>
       <p class="configuration-template-help">复制后请粘贴到 <strong>Project Config → Environment</strong>。保存配置后，必须重新部署服务才会生效。</p>
+    </section>
+    <section class="configuration-panel optional-dependencies" aria-labelledby="optional-dependencies-title">
+      <div class="section-title"><div><h2 id="optional-dependencies-title">可选依赖安装指引</h2><p class="muted">以下属于部署环境依赖，无法从网页安装。安装完成后请重新部署，并在“运行能力”中重新检测。</p></div></div>
+      <div class="optional-dependencies__list">
+        <article class="optional-dependency"><h3>MinerU</h3><p>安装后可获得 OCR、版面还原与表格结构识别。</p><code>pip install 'mineru[core]'</code><p class="muted">首次使用会下载模型；请将 <code>RAG_PARSER_CACHE_DIR</code> 设置为可写的持久化缓存目录，通常建议使用 GPU。</p></article>
+        <article class="optional-dependency"><h3>LibreOffice</h3><p>通过系统包管理器安装：</p><code>apt-get install libreoffice</code><p class="muted">仅影响 DOC/DOCX/PPT/XLS 等 Office 文件；只用 PDF 和图片时可不装。</p></article>
+      </div>
     </section>`;
 
   const tbody = page.querySelector("tbody");
