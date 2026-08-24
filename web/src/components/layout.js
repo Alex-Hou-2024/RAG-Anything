@@ -1,6 +1,7 @@
 const NAVIGATION = [
   ["/documents", "文档管理"],
   ["/chat", "对话问答"],
+  ["/configuration", "配置指南"],
 ];
 
 export function createLayout(activePath, content, lightragAvailable = false, ragStatus = {}) {
