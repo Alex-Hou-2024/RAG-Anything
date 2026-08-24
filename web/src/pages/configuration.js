@@ -1,10 +1,23 @@
 import { getConfigurationGuide } from "../api/configuration.js";
 import { createNotice } from "../components/layout.js";
 
+const TEMPLATE_PLACEHOLDERS = {
+  OPENAI_API_KEY: "<在此填入你的密钥>",
+  DATABASE_URL: "<在此填入数据库连接地址>",
+  OBJECT_STORAGE_ACCESS_KEY_ID: "<在此填入 S3 access key>",
+  OBJECT_STORAGE_SECRET_ACCESS_KEY: "<在此填入 S3 secret key>",
+};
+const S3_KEYS = new Set([
+  "OBJECT_STORAGE_ENDPOINT",
+  "OBJECT_STORAGE_BUCKET",
+  "OBJECT_STORAGE_ACCESS_KEY_ID",
+  "OBJECT_STORAGE_SECRET_ACCESS_KEY",
+]);
+
 function statusFor(item) {
   if (!item.valid) return ["配置无效", "failed"];
   if (!item.configured) {
-    if (item.key.startsWith("OBJECT_STORAGE_")) return ["未配置（回退本地目录）", "muted"];
+    if (S3_KEYS.has(item.key)) return ["未配置（回退本地目录）", "muted"];
     return ["未配置", item.required ? "failed" : "muted"];
   }
   if (item.uses_default) return ["使用默认值", "muted"];
@@ -47,21 +60,64 @@ function renderGuideRow(item, noticeHost) {
   return row;
 }
 
+function effectiveTemplateValue(item) {
+  if (Object.hasOwn(TEMPLATE_PLACEHOLDERS, item.key)) return TEMPLATE_PLACEHOLDERS[item.key];
+  if (item.effective_value !== null && item.effective_value !== undefined) {
+    return String(item.effective_value);
+  }
+  if (item.recommended !== null && item.recommended !== undefined) return String(item.recommended);
+  return "";
+}
+
+/** Build a safe, paste-ready .env snippet from the server-owned guide items. */
+export function buildConfigurationTemplate(items) {
+  const lines = [
+    "# RAG-Anything 配置模板",
+    "# 将内容粘贴到 Project Config → Environment；保存后需要重新部署才会生效。",
+    "",
+  ];
+  const regularItems = items.filter((item) => !S3_KEYS.has(item.key));
+  for (const item of regularItems) {
+    lines.push(`${item.key}=${effectiveTemplateValue(item)}`);
+  }
+
+  const s3Items = items.filter((item) => S3_KEYS.has(item.key));
+  if (s3Items.some((item) => item.configured)) {
+    lines.push("", "# 已启用 S3 兼容存储：四项必须同时填写。 ");
+    for (const item of s3Items) lines.push(`${item.key}=${effectiveTemplateValue(item)}`);
+  } else {
+    lines.push(
+      "",
+      "# 可选 S3 兼容存储：保持以下四项不填即可使用本地目录；如启用则四项必须同时填写。",
+      "# OBJECT_STORAGE_ENDPOINT=",
+      "# OBJECT_STORAGE_BUCKET=",
+      "# OBJECT_STORAGE_ACCESS_KEY_ID=<在此填入 S3 access key>",
+      "# OBJECT_STORAGE_SECRET_ACCESS_KEY=<在此填入 S3 secret key>",
+    );
+  }
+  return lines.join("\n");
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.append(input);
+  input.select();
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (!copied) throw new Error("copy command failed");
+}
+
 async function copyVariableName(name, button, noticeHost) {
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(name);
-    } else {
-      const input = document.createElement("textarea");
-      input.value = name;
-      input.setAttribute("readonly", "");
-      input.style.position = "fixed";
-      input.style.opacity = "0";
-      document.body.append(input);
-      input.select();
-      if (!document.execCommand("copy")) throw new Error("copy command failed");
-      input.remove();
-    }
+    await copyText(name);
     button.textContent = "已复制";
     noticeHost.replaceChildren(createNotice(`${name} 已复制到剪贴板。`, "success"));
   } catch {
@@ -84,11 +140,30 @@ export function createConfigurationPage() {
         <thead><tr><th scope="col">变量名</th><th scope="col">是否必填</th><th scope="col">当前状态</th><th scope="col">可选值</th><th scope="col">推荐值</th><th scope="col">作用说明</th><th scope="col">不配置的后果</th></tr></thead>
         <tbody></tbody>
       </table></div>
+    </section>
+    <section class="configuration-panel configuration-template-panel" aria-labelledby="template-title">
+      <div class="section-title"><div><h2 id="template-title">配置模板</h2><p class="muted">模板使用当前安全的生效值和推荐默认值；所有密钥位置均为占位符。</p></div><button class="button button--primary configuration-template-copy" type="button" disabled>复制完整配置模板</button></div>
+      <pre class="configuration-template" aria-label="配置模板预览"></pre>
+      <p class="configuration-template-help">复制后请粘贴到 <strong>Project Config → Environment</strong>。保存配置后，必须重新部署服务才会生效。</p>
     </section>`;
 
   const tbody = page.querySelector("tbody");
   const noticeHost = page.querySelector(".configuration-notice");
+  const templatePreview = page.querySelector(".configuration-template");
+  const templateCopyButton = page.querySelector(".configuration-template-copy");
+  let template = "";
   let disposed = false;
+
+  templateCopyButton.addEventListener("click", async () => {
+    try {
+      await copyText(template);
+      templateCopyButton.textContent = "模板已复制";
+      noticeHost.replaceChildren(createNotice("完整配置模板已复制。保存到 Project Config → Environment 后请重新部署。", "success"));
+    } catch {
+      noticeHost.replaceChildren(createNotice("无法自动复制配置模板，请手动选择并复制预览内容。"));
+    }
+    window.setTimeout(() => { templateCopyButton.textContent = "复制完整配置模板"; }, 1800);
+  });
 
   async function loadGuide() {
     noticeHost.replaceChildren(createNotice("正在加载配置清单…", "info"));
@@ -97,6 +172,9 @@ export function createConfigurationPage() {
       if (disposed) return;
       if (!Array.isArray(response?.items)) throw new Error("配置清单响应格式无效");
       tbody.replaceChildren(...response.items.map((item) => renderGuideRow(item, noticeHost)));
+      template = buildConfigurationTemplate(response.items);
+      templatePreview.textContent = template;
+      templateCopyButton.disabled = false;
       noticeHost.replaceChildren();
     } catch (error) {
       if (!disposed) noticeHost.replaceChildren(createNotice(`无法加载配置清单：${error.message}`));
