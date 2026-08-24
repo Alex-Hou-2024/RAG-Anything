@@ -17,6 +17,17 @@ const STATUS_LABELS = {
   failed: "处理失败",
 };
 
+const OPTIONAL_DEPENDENCY_GUIDES = {
+  MinerU: {
+    command: "pip install 'mineru[core]'",
+    detail: "首次使用会下载模型，RAG_PARSER_CACHE_DIR 必须是可写的持久化缓存目录，通常建议使用 GPU。安装后可获得 OCR、版面还原与表格结构识别。",
+  },
+  LibreOffice: {
+    command: "apt-get install libreoffice",
+    detail: "仅影响 DOC/DOCX/PPT/XLS 等 Office 文件；只用 PDF 和图片时可不装。",
+  },
+};
+
 export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {}) {
   const page = document.createElement("section");
   page.className = "page page--documents";
@@ -113,6 +124,16 @@ export function createDocumentsPage({ ragAvailable = false, ragStatus = {} } = {
         const description = document.createElement("small");
         description.textContent = note.trim();
         item.append(title, badge, description);
+        const dependencyGuide = OPTIONAL_DEPENDENCY_GUIDES[name];
+        if (dependencyGuide) {
+          const install = document.createElement("small");
+          install.className = "capability-install";
+          install.append("这是部署环境依赖，无法从网页安装。安装命令：");
+          const command = document.createElement("code");
+          command.textContent = dependencyGuide.command;
+          install.append(command, `。${dependencyGuide.detail}`);
+          item.append(install);
+        }
         return item;
       }));
     } catch (error) {
